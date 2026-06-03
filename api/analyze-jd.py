@@ -1,6 +1,6 @@
 import sys, os, json
 sys.path.insert(0, os.path.dirname(__file__))
-from _lib import build_persona_response
+from _lib import build_persona_response, SafetyError
 from http.server import BaseHTTPRequestHandler
 
 class handler(BaseHTTPRequestHandler):
@@ -16,10 +16,13 @@ class handler(BaseHTTPRequestHandler):
             text   = body.get("text", "").strip()
             url    = body.get("url", "").strip()
             if not text and not url:
-                self._json({"error": "Provide 'text' or 'url'"}, 400)
+                self._json({"error": "Please provide a job posting URL or paste the job description text."}, 400)
                 return
             result = build_persona_response(text=text, url=url)
             self._json(result)
+        except SafetyError as e:
+            # User-facing validation error — 400, not 500
+            self._json({"error": str(e), "error_type": "input_validation"}, 400)
         except Exception as e:
             self._json({"error": str(e)}, 500)
 
