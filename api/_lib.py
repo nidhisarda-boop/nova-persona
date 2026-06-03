@@ -2,8 +2,205 @@
 Nova Candidate Map — v3 backend
 Pipeline: Jina → O*NET → CareerOneStop → Tavily → Gemini/Groq → normalize
 """
-import os, re, json, time, urllib.parse
+import os, re, json, time, urllib.parse, socket, ipaddress
 import requests
+
+
+# ── Safety Layer ───────────────────────────────────────────────────────────
+
+class SafetyError(ValueError):
+    """Raised when input fails safety validation. Message is user-facing."""
+    pass
+
+
+# Private/reserved IP ranges that must never be fetched (SSRF protection)
+_PRIVATE_RANGES = [
+    ipaddress.ip_network("10.0.0.0/8"),
+    ipaddress.ip_network("172.16.0.0/12"),
+    ipaddress.ip_network("192.168.0.0/16"),
+    ipaddress.ip_network("127.0.0.0/8"),
+    ipaddress.ip_network("169.254.0.0/16"),   # link-local
+    ipaddress.ip_network("::1/128"),           # IPv6 loopback
+    ipaddress.ip_network("fc00::/7"),          # IPv6 private
+]
+
+# Domains that commonly appear in spam/phishing/test abuse
+_BLOCKED_DOMAIN_PATTERNS = [
+    r"localhost", r"127\.\d+\.\d+\.\d+", r"0\.0\.0\.0",
+    r"\.onion$", r"\.internal$", r"\.local$",
+    r"burpcollaborator", r"ngrok\.io", r"requestbin",
+    r"webhook\.site", r"pipedream\.net",
+]
+
+# Prompt injection patterns — sequences that try to hijack the LLM
+_INJECTION_PATTERNS = [
+    r"ignore\s+(all\s+)?(previous|prior|above)\s+instructions?",
+    r"you\s+are\s+now\s+(a\s+)?(?:dan|jailbreak|unrestricted|evil)",
+    r"(system|assistant|user)\s*:\s*",
+    r"<\s*(system|instruction|prompt)\s*>",
+    r"\[INST\]|\[\/INST\]",
+    r"###\s*(instruction|system|override)",
+    r"act\s+as\s+(if\s+you\s+are\s+)?(?:an?\s+)?(?:unrestricted|evil|jailbroken|unfiltered)",
+    r"(disregard|forget|bypass|override)\s+(your\s+)?(training|guidelines|rules|safety|constraints)",
+    r"(print|output|say|repeat|write|return)\s+.*?(password|token|secret|api.?key)",
+    r"(execute|run|eval)\s*[\(\{]",
+]
+
+# Minimum signals that suggest content is job-related
+_JOB_SIGNALS = [
+    r"\b(job|role|position|vacancy|opening|opportunity|career|hiring|recruit)\b",
+    r"\b(qualifications?|requirements?|responsibilities|experience|skills?|degree)\b",
+    r"\b(salary|compensation|pay|benefits?|perks?|equity|bonus)\b",
+    r"\b(apply|application|candidate|resume|cv|interview)\b",
+    r"\b(full.?time|part.?time|remote|hybrid|on.?site|contract|freelance)\b",
+    r"\b(company|team|department|manager|report|stakeholder)\b",
+    r"\b(years?\s+of\s+experience|preferred|required|must.have|nice.to.have)\b",
+]
+
+
+def validate_url(url: str) -> str:
+    """
+    Validate and sanitize a URL before fetching.
+    Returns the cleaned URL or raises SafetyError with a user-facing message.
+    """
+    url = url.strip()
+
+    # Length check
+    if len(url) > 2048:
+        raise SafetyError("That URL is too long. Please paste a direct link to the job posting.")
+
+    # Scheme check — only HTTP/HTTPS allowed
+    try:
+        parsed = urllib.parse.urlparse(url)
+    except Exception:
+        raise SafetyError("That doesn't look like a valid URL. Please paste a direct link to the job posting.")
+
+    if parsed.scheme not in ("http", "https"):
+        raise SafetyError(
+            "Only https:// and http:// URLs are supported. "
+            "File paths, FTP links, and other schemes are not accepted."
+        )
+
+    hostname = parsed.hostname or ""
+    if not hostname:
+        raise SafetyError("Could not read a hostname from that URL. Please check the link and try again.")
+
+    # Block obviously bad domains
+    for pattern in _BLOCKED_DOMAIN_PATTERNS:
+        if re.search(pattern, hostname, re.IGNORECASE):
+            raise SafetyError(
+                "That URL doesn't appear to be a public job posting. "
+                "Please paste a direct link to a publicly accessible job page."
+            )
+
+    # SSRF: resolve hostname and check against private ranges
+    try:
+        ip_str = socket.gethostbyname(hostname)
+        ip_obj = ipaddress.ip_address(ip_str)
+        for private_range in _PRIVATE_RANGES:
+            if ip_obj in private_range:
+                raise SafetyError(
+                    "That URL resolves to a private or internal address. "
+                    "Please paste a link to a public job posting."
+                )
+    except SafetyError:
+        raise
+    except Exception:
+        # DNS failure — let Jina handle it and fall back gracefully
+        pass
+
+    return url
+
+
+def validate_text(text: str) -> str:
+    """
+    Validate pasted job description text.
+    Returns sanitized text or raises SafetyError.
+    """
+    text = text.strip()
+
+    # Length limits
+    if len(text) < 30:
+        raise SafetyError(
+            "That text is too short to be a job description. "
+            "Please paste the full job posting text."
+        )
+    if len(text) > 50_000:
+        raise SafetyError(
+            "That text is too long. Please paste the core job description "
+            "(under 50,000 characters)."
+        )
+
+    # Repetition check — garbage like "aaaaaaa..." or "1111111..."
+    if _is_repetitive_garbage(text):
+        raise SafetyError(
+            "That input doesn't look like a job description. "
+            "Please paste the actual job posting text."
+        )
+
+    # Prompt injection check
+    injection_hit = _check_injection(text)
+    if injection_hit:
+        raise SafetyError(
+            "That input contains content Nova can't process safely. "
+            "Please paste a standard job description."
+        )
+
+    # Must have at least 2 job-related signals
+    signals_found = sum(
+        1 for pattern in _JOB_SIGNALS
+        if re.search(pattern, text, re.IGNORECASE)
+    )
+    if signals_found < 2:
+        raise SafetyError(
+            "That doesn't appear to be a job description. "
+            "Nova works best with actual job postings. "
+            "Please paste the role requirements, responsibilities, and qualifications."
+        )
+
+    return text
+
+
+def sanitize_for_prompt(text: str) -> str:
+    """
+    Strip or neutralize prompt injection sequences before embedding in LLM prompt.
+    Does NOT raise — silently cleans the content.
+    """
+    # Remove common injection trigger sequences
+    for pattern in _INJECTION_PATTERNS:
+        text = re.sub(pattern, "[removed]", text, flags=re.IGNORECASE)
+
+    # Strip unusual control characters but preserve normal whitespace
+    text = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]", "", text)
+
+    # Cap at 8000 chars for prompt safety (truncate with notice)
+    if len(text) > 8000:
+        text = text[:8000] + "\n[content truncated for safety]"
+
+    return text
+
+
+def _is_repetitive_garbage(text: str) -> bool:
+    """Detect strings that are mostly repeated characters (spam/garbage)."""
+    if len(text) < 50:
+        return False
+    # Count unique chars relative to length
+    unique_ratio = len(set(text.lower())) / len(text)
+    if unique_ratio < 0.02:
+        return True
+    # Check for very long runs of the same character
+    if re.search(r"(.)\1{49,}", text):
+        return True
+    return False
+
+
+def _check_injection(text: str) -> str | None:
+    """Return the matched injection pattern string, or None if clean."""
+    for pattern in _INJECTION_PATTERNS:
+        m = re.search(pattern, text, re.IGNORECASE)
+        if m:
+            return m.group(0)
+    return None
 
 # ── API keys (set as Vercel env vars) ──────────────────────────────────────
 JINA_KEY        = os.environ.get("JINA_API_KEY", "")
@@ -563,8 +760,14 @@ def build_persona_response(text: str = "", url: str = "", source: str = "job_des
     start = time.time()
     result = {"_pipeline": {}}
 
+    # ── Safety: validate inputs before doing anything ──────────────────────
+    if url:
+        url = validate_url(url)          # raises SafetyError if bad URL
+    if text:
+        text = validate_text(text)       # raises SafetyError if garbage/injection
+
     # Stage 1: Fetch content
-    jd_content = text.strip()
+    jd_content = text.strip() if text else ""
     fallback = False
     inferred_title = ""
 
@@ -576,8 +779,21 @@ def build_persona_response(text: str = "", url: str = "", source: str = "job_des
         result["_pipeline"]["jina_chars"] = len(jd_content)
         result["_pipeline"]["fallback"] = fallback
 
-    if not jd_content:
+        # Validate fetched content too (could be login wall, captcha page, or injected page)
+        if jd_content and not fallback:
+            try:
+                validate_text(jd_content)
+            except SafetyError:
+                # Page loaded but isn't a job description — trigger fallback
+                fallback = True
+                jd_content = inferred_title or ""
+                result["_pipeline"]["fallback_reason"] = "fetched_page_not_job_related"
+
+    if not jd_content and not inferred_title:
         raise ValueError("No job content provided and URL fetch returned empty content.")
+
+    # ── Sanitize before injecting into LLM prompt ──────────────────────────
+    jd_content = sanitize_for_prompt(jd_content)
 
     # Stage 2: Extract signals
     signals = _extract_signals(jd_content)
