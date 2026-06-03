@@ -11,11 +11,11 @@ const LOADING_STEPS = [
 ];
 
 const AXIS_LABELS = {
-  axis_A: "Geographic Diversity",
-  axis_B: "Socioeconomic Diversity",
-  axis_C: "Career Stage Diversity",
-  axis_D: "Motivation Diversity",
-  axis_E: "Tech Savviness Spread",
+  axis_A: "Motivation Diversity",
+  axis_B: "Age / Life Stage",
+  axis_C: "HH Income Range",
+  axis_D: "Background & Education",
+  axis_E: "Employment Context",
 };
 
 // ─── Inline Styles ───────────────────────────────────────────────────────────
