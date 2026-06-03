@@ -230,6 +230,31 @@ def _extract_signals(text: str) -> dict:
 
 SYSTEM_PROMPT = """You are the core intelligence engine of Nova Candidate Map. Your purpose is to convert raw job description text and localized labor market data into an auditable, data-backed candidate market map consisting of 3 to 6 MECE personas.
 
+STEP 0 — EXTRACT HARD JD FILTERS (do this before everything else)
+Read the full JD and extract these constraints. Every persona you generate MUST be grounded in these filters:
+1. work_location: exact city/country/remote status
+2. shift_constraint: specific required hours or timezone (e.g. "US shift 5PM–2AM IST", "night shift", "UK hours")
+3. onsite_requirement: mandatory on-site / hybrid / remote
+4. experience_range: min–max years explicitly stated
+5. preferred_industries: sectors/backgrounds explicitly mentioned or implied (e.g. "adtech", "SaaS CS", "recruitment marketing")
+6. required_tools_metrics: specific tools, platforms, or metrics named (e.g. "CPA, CPC, CTR, CPH, NRR", "Salesforce", "programmatic")
+7. explicit_disqualifiers: anything the JD says or implies will cause failure (e.g. "not for people who treat AM as status reporting", "on-site is non-negotiable", "night shift flexibility required")
+
+CRITICAL RULES FOR PERSONA GENERATION:
+- Personas MUST be labor-market segments (real candidate pools with distinct backgrounds and paths to this role), NOT personality archetypes ("The Results Driver", "The Relationship Builder")
+- Each persona's archetype must reference their ACTUAL PRIOR BACKGROUND (e.g. "The Ad Ops Operator", "The SaaS CS Migrant", "The Recruitment Tech AM")
+- Churn triggers and interview red flags MUST reflect the JD's hard constraints (shift, on-site, metrics depth, escalation pressure) — not generic dissatisfaction
+- Sourcing channels MUST be market-specific (India: Naukri, Instahyre, LinkedIn India, AngelList/Wellfound, IIM Jobs, iimjobs.com; US: LinkedIn, Indeed, AngelList; UK: LinkedIn, CWJobs, TotalJobs)
+- Currency and income figures MUST match the role's country (INR for India, USD for US, GBP for UK)
+- The household income classification must use LOCAL market context — Indian HH income tiers differ fundamentally from US Pew tiers
+
+INDIA HOUSEHOLD INCOME TIERS (use when role is India-based):
+- Lower: <₹3L/yr — very high financial pressure
+- Lower-middle: ₹3L–₹8L/yr — stretched, this role is a significant upgrade
+- Middle: ₹8L–₹20L/yr — stable, motivated by career growth and brand name
+- Upper-middle: ₹20L–₹40L/yr — selective, motivated by ownership and equity
+- Upper: ₹40L+/yr — financially secure, motivated by impact and autonomy
+
 STEP 1 — CLASSIFICATION AND PRESET ANCHORING
 Classify the role into exactly one of five presets to anchor your persona count band:
 - hourly_frontline (retail, warehouse, delivery, food service) → 5–6 personas
@@ -269,6 +294,15 @@ Pew HH Income Tiers (calibrate to local COL):
 - Upper-middle: $100k–$175k — comfortable, gig work genuinely optional
 - Upper: $175k+ — financially secure, exploratory or bridge situation
 
+SELF-VALIDATION — Before returning output, check all of these. If any fail, regenerate:
+✗ REJECT if all personas share the same age range
+✗ REJECT if all personas share the same sourcing channel
+✗ REJECT if all personas share the same educational background
+✗ REJECT if persona archetypes are personality types rather than prior-background segments
+✗ REJECT if the JD's shift constraint, location, or required metrics do NOT appear in at least one churn_trigger or screening_question
+✗ REJECT if income figures use the wrong currency for the role's country
+✗ REJECT if sourcing channels are country-wrong (e.g. Indeed/Facebook Local for an India role)
+
 Return ONLY valid JSON. No markdown. No explanation."""
 
 
@@ -298,6 +332,16 @@ def _build_prompt(jd_text: str, signals: dict, onet: dict, wages: dict, demos: s
     schema = '''
 === OUTPUT JSON SCHEMA (return ONLY this, no markdown) ===
 {
+  "jd_hard_filters": {
+    "work_location": "string — exact city/country",
+    "shift_constraint": "string — e.g. US shift 5PM-2AM IST, or null",
+    "onsite_requirement": "mandatory|hybrid|remote",
+    "experience_range": "string — e.g. 1-5 years",
+    "preferred_industries": ["string"],
+    "required_tools_metrics": ["string"],
+    "explicit_disqualifiers": ["string"],
+    "market_context": "India|US|UK|Global"
+  },
   "role_summary": "string",
   "recruiter_brief": "string",
   "local_context": {
