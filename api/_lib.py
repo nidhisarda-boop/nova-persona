@@ -294,6 +294,23 @@ Pew HH Income Tiers (calibrate to local COL):
 - Upper-middle: $100k–$175k — comfortable, gig work genuinely optional
 - Upper: $175k+ — financially secure, exploratory or bridge situation
 
+GIG/CONTRACTOR ROLE SPECIAL RULES (apply when preset = gig_flexible or hourly_frontline):
+1. MINIMUM AGE: Do NOT generate personas below the minimum eligible age for the role. For rideshare/delivery platforms: minimum is typically 21 (Lyft, Uber) or 18 in select markets. Never assume 18 unless confirmed by JD or platform requirements page. Use "21–25 (verify local requirements)" not "18–25".
+2. EARNINGS CLAIMS: Do NOT use specific earnings claims like "Earn up to $X/week" or "Make $X per hour" unless these are directly quoted from the JD. Platforms like Lyft have faced FTC enforcement for inflated earnings claims. Instead use: "Earn on your schedule", "See pay upfront", "Cash out fast" — benefit-led, not amount-specific.
+3. VEHICLE ACCESS SEGMENTATION: For vehicle-required gig roles, segment candidates by vehicle situation:
+   - "Owns qualifying vehicle" — straightforward to start
+   - "Needs rental/Express Drive option" — high intent, blocked by upfront cost, convert via rental program
+   - "Unsure if vehicle qualifies" — needs vehicle requirements clarification first
+   This MUST appear in at least one persona's onboarding friction or churn trigger.
+4. ONBOARDING QUESTIONS NOT INTERVIEW QUESTIONS: For contractor/gig roles, replace "screening_question" with an onboarding/conversion question — the goal is to predict activation and retention, not assess fit for employment. Example: "What would make you prioritize Lyft over your other earning apps this week?" not "Tell me about yourself."
+5. ANTI-REPETITION: The following MUST be DIFFERENT across all personas:
+   - primary_motivation (ban: using "flexibility and autonomy" for more than one persona)
+   - sourcing_channel.primary (no two personas can share the same primary channel)
+   - conversion_hook.headline (every headline must be genuinely different)
+   - churn_trigger (cannot be the same payment/income issue for every persona)
+6. COMPETING APPS: For platform gig roles, the multi-app segment is real and large. At least one persona should address a driver who already uses competing platforms (Uber, DoorDash, Instacart). Their acquisition hook is "marginal value of adding Lyft" not "join Lyft."
+7. ROLE TYPE: For contractor roles, use "contractor" in employment_status fields, not "employee" or "part-time worker".
+
 SELF-VALIDATION — Before returning output, check all of these. If any fail, regenerate:
 ✗ REJECT if all personas share the same age range
 ✗ REJECT if all personas share the same sourcing channel
@@ -302,6 +319,11 @@ SELF-VALIDATION — Before returning output, check all of these. If any fail, re
 ✗ REJECT if the JD's shift constraint, location, or required metrics do NOT appear in at least one churn_trigger or screening_question
 ✗ REJECT if income figures use the wrong currency for the role's country
 ✗ REJECT if sourcing channels are country-wrong (e.g. Indeed/Facebook Local for an India role)
+✗ REJECT if any persona age range starts below the role's minimum eligibility age
+✗ REJECT if any conversion_hook.headline contains a specific earnings dollar/currency amount not sourced directly from the JD
+✗ REJECT if all primary_motivations are variations of "flexibility and autonomy"
+✗ REJECT if two or more personas share the same sourcing_channel.primary
+✗ REJECT if gig role has no persona addressing vehicle access barrier or competing platform users
 
 Return ONLY valid JSON. No markdown. No explanation."""
 
