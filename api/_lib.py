@@ -454,8 +454,11 @@ def _tavily_demographics(title: str, location: str) -> str:
 # ── Stage 5: Signal extraction ─────────────────────────────────────────────
 
 def _extract_signals(text: str) -> dict:
-    """Extract title, company, location, salary, arrangement from JD text."""
-    signals = {"title": "", "company": "", "location": "", "salary": "", "arrangement": ""}
+    """Deterministically extract structured fields from JD text. These are handed
+    to the model as authoritative — far more reliable than asking a weak model to
+    re-read a raw blob for salary/location."""
+    signals = {"title": "", "company": "", "location": "", "salary": "",
+               "arrangement": "", "experience": "", "responsibilities": []}
 
     # Title: look for common patterns
     title_patterns = [
@@ -469,28 +472,63 @@ def _extract_signals(text: str) -> dict:
             signals["title"] = m.group(1).strip()
             break
 
-    # Location
-    loc_m = re.search(
-        r"\b([A-Z][a-z]+(?:\s[A-Z][a-z]+)*,\s*(?:[A-Z]{2}|[A-Za-z]+))\b", text[:1000]
-    )
-    if loc_m:
-        signals["location"] = loc_m.group(1)
-
-    # Salary
-    sal_m = re.search(
-        r"[\$£€₹][\d,]+(?:\s*[-–]\s*[\$£€₹]?[\d,]+)?(?:\s*(?:per year|per hour|annually|\/yr|\/hr))?",
+    # Location — prefer an explicitly labeled line, else first "City, ST/Country"
+    loc_label = re.search(
+        r"(?:work location|location|based in|office)\s*[:\-]\s*([A-Z][A-Za-z .'/]+(?:,\s*[A-Za-z]{2,})?)",
         text, re.IGNORECASE,
     )
-    if sal_m:
-        signals["salary"] = sal_m.group(0)
+    if loc_label:
+        signals["location"] = loc_label.group(1).strip().rstrip(".").strip()
+    else:
+        loc_m = re.search(
+            r"\b([A-Z][a-z]+(?:\s[A-Z][a-z]+)*,\s*(?:[A-Z]{2}|[A-Za-z]+))\b", text[:1500]
+        )
+        if loc_m:
+            signals["location"] = loc_m.group(1)
+
+    # Salary — labeled line first (handles "$165,000 - $185,000", "$165.000", "+ bonus")
+    sal_label = re.search(
+        r"(?:salary|compensation|pay|base(?:\s*salary)?)\s*[:\-]?\s*"
+        r"([\$£€₹]\s?[\d.,]+(?:\s*[-–]\s*[\$£€₹]?\s?[\d.,]+)?(?:\s*[KkMm])?(?:\s*\+\s*[A-Za-z ]+)?)",
+        text, re.IGNORECASE,
+    )
+    if sal_label:
+        signals["salary"] = sal_label.group(1).strip()
+    else:
+        sal_m = re.search(r"[\$£€₹]\s?[\d.,]+(?:\s*[-–]\s*[\$£€₹]?\s?[\d.,]+)?(?:\s*[KkMm])?", text)
+        if sal_m:
+            signals["salary"] = sal_m.group(0).strip()
+        else:
+            lpa = re.search(r"[\d.,]+\s*(?:LPA|lakhs?|crore)\b", text, re.IGNORECASE)
+            if lpa:
+                signals["salary"] = lpa.group(0).strip()
+
+    # Experience requirement
+    exp_m = re.search(r"(\d+\+?(?:\s*[-–]\s*\d+)?\s*years?(?:\s*of\s*experience)?)", text, re.IGNORECASE)
+    if exp_m:
+        signals["experience"] = exp_m.group(1).strip()
 
     # Arrangement
-    if re.search(r"\b(?:remote|work from home|wfh)\b", text, re.IGNORECASE):
-        signals["arrangement"] = "remote"
-    elif re.search(r"\b(?:hybrid)\b", text, re.IGNORECASE):
-        signals["arrangement"] = "hybrid"
-    elif re.search(r"\b(?:on.?site|in.?office|in.?person)\b", text, re.IGNORECASE):
+    if re.search(r"\bon.?site\b|\bin.?office\b|\bin.?person\b", text, re.IGNORECASE):
         signals["arrangement"] = "on-site"
+    elif re.search(r"\bhybrid\b", text, re.IGNORECASE):
+        signals["arrangement"] = "hybrid"
+    elif re.search(r"\bremote\b|work from home|\bwfh\b", text, re.IGNORECASE):
+        signals["arrangement"] = "remote"
+
+    # Responsibility bullets — pull lines under "What You'll Do" / "Responsibilities"
+    resp_block = re.search(
+        r"(?:what you.?ll do|responsibilities|role overview|key responsibilities)\b[:\s]*"
+        r"(.+?)(?:what you.?ll need|what we offer|requirements|qualifications|benefits|$)",
+        text, re.IGNORECASE | re.DOTALL,
+    )
+    if resp_block:
+        bullets = []
+        for line in resp_block.group(1).splitlines():
+            line = line.strip(" -•*\t•")
+            if 12 <= len(line) <= 220 and re.search(r"[a-z]", line):
+                bullets.append(line)
+        signals["responsibilities"] = bullets[:8]
 
     return signals
 
@@ -521,7 +559,8 @@ Every persona MUST map to talent pools that fit this operating center as defined
 CRITICAL RULES FOR PERSONA GENERATION:
 - EVIDENCE INTEGRITY: evidence_basis, notes, and confidence fields may ONLY cite a source whose data was actually supplied in INPUT DATA (ONET_GROUNDING, MARKET_GROUNDING). NEVER invent source names such as "LinkedIn postings", "Glassdoor salary data", "Indeed insights", or "alumni placement data". If no external source was supplied, write exactly: "Inferred from JD requirements; external salary source not used."
 - Personas MUST be labor-market segments (real candidate pools with distinct backgrounds and paths to this role), NOT personality archetypes ("The Results Driver", "The Relationship Builder")
-- Each persona's archetype must reference their ACTUAL PRIOR BACKGROUND (e.g. "The Ad Ops Operator", "The SaaS CS Migrant", "The Recruitment Tech AM")
+- Each persona's archetype AND name must name a SOURCEABLE prior-background talent pool — a real group you could filter for on LinkedIn/Naukri by their last role, industry, or employer type (e.g. "Agency Campaign Operator", "CPG Brand Marketer", "Media-Agency Social Lead", "The Ad Ops Operator", "The SaaS CS Migrant")
+- BANNED as an archetype or name: functional skills or personality traits that EVERY candidate for this role would share — e.g. "Data-Driven", "Creative", "Storyteller", "Data-Driven Brand Builder", "Creative Storyteller", "Strategic Thinker", "Results-Driven", "Innovative". These are not distinct candidate pools and cannot be sourced. Litmus test: if you cannot rephrase the archetype as "their last role was X" or "they come from Y industry", it is INVALID — fix it before returning.
 - Churn triggers and interview red flags MUST reflect the JD's hard constraints (shift, on-site, metrics depth, escalation pressure) — not generic dissatisfaction
 - Sourcing channels MUST be market-specific (India: Naukri, Instahyre, LinkedIn India, AngelList/Wellfound, IIM Jobs, iimjobs.com; US: LinkedIn, Indeed, AngelList; UK: LinkedIn, CWJobs, TotalJobs)
 - Currency and income figures MUST match the role's country (INR for India, USD for US, GBP for UK)
@@ -597,6 +636,11 @@ SELF-VALIDATION — Before returning output, check all of these. If any fail, re
 ✗ REJECT if all personas share the same sourcing channel
 ✗ REJECT if all personas share the same educational background
 ✗ REJECT if persona archetypes are personality types rather than prior-background segments
+✗ REJECT if any archetype/name is a functional skill or trait ("Data-Driven", "Creative Storyteller", "Strategic", "Brand Builder") instead of a sourceable prior-background pool
+✗ REJECT if STRUCTURED_JD provides a work_location or salary but you output "Not specified" / omit it — you MUST use the structured value verbatim
+✗ REJECT if pew_household_income_tier contradicts household_income_range per the tier bands (e.g. labeling ~$80k "Lower-middle" when that band is $35k–$65k)
+✗ REJECT if target_monthly_income_from_role is inconsistent with the JD's stated salary (gross monthly ≈ JD annual ÷ 12) when the JD states a salary
+✗ REJECT if overall_score is ≥ 75 while salary AND location were NOT grounded (no structured salary/location and no external source) — in that case overall_score must be ≤ 65
 ✗ REJECT if the JD's shift constraint, location, or required metrics do NOT appear in at least one churn_trigger or screening_question
 ✗ REJECT if income figures use the wrong currency for the role's country
 ✗ REJECT if sourcing channels are country-wrong (e.g. Indeed/Facebook Local for an India role)
@@ -675,7 +719,13 @@ def _build_prompt(jd_text: str, signals: dict, onet: dict, wages: dict, demos: s
     else:
         parts.append(f"\nCLEAN_JD_MARKDOWN:\n{jd_text[:4000]}")
 
-    parts.append(f"\nSIGNALS EXTRACTED:\n{json.dumps(signals, indent=2)}")
+    parts.append(
+        "\nSTRUCTURED_JD (extracted directly from the posting — AUTHORITATIVE). "
+        "Use these values VERBATIM. Never output \"Not specified\" for a field present here. "
+        "A salary or location present here OVERRIDES all inferred or benchmark figures, "
+        "and the responsibilities below define the role's true operating center:\n"
+        + json.dumps({k: v for k, v in signals.items() if v}, indent=2)
+    )
 
     if onet:
         parts.append(f"\nONET_GROUNDING:\n{json.dumps(onet, indent=2)}")
