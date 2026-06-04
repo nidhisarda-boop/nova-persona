@@ -113,11 +113,17 @@ class handler(BaseHTTPRequestHandler):
             # Log the real error to the server (visible in Vercel logs only),
             # return a generic message so internal details never reach the client.
             import traceback
-            traceback.print_exc()
-            self._json({
+            tb = traceback.format_exc()
+            print(tb)
+            payload = {
                 "error": "Something went wrong while generating personas. Please try again.",
                 "error_type": "server_error"
-            }, 500)
+            }
+            # TEMPORARY DIAGNOSTIC: reveal the exception only when X-Debug header is sent.
+            if self.headers.get("X-Debug") == "nova-temp":
+                payload["debug"] = repr(e)
+                payload["trace"] = tb[-1500:]
+            self._json(payload, 500)
 
     def _cors(self):
         # Allowlist of origins permitted to call this endpoint cross-origin.
