@@ -553,8 +553,11 @@ def _extract_signals(text: str) -> dict:
             if lpa:
                 signals["salary"] = lpa.group(0).strip()
 
-    # Experience requirement
-    exp_m = re.search(r"(\d+\+?(?:\s*[-–]\s*\d+)?\s*years?(?:\s*of\s*experience)?)", text, re.IGNORECASE)
+    # Experience requirement (English "years" or Dutch "jaar")
+    exp_m = re.search(
+        r"(\d+\+?(?:\s*[-–]\s*\d+)?\s*(?:years?|jaar)(?:\s*(?:of\s*experience|ervaring|relevante))?)",
+        text, re.IGNORECASE,
+    )
     if exp_m:
         signals["experience"] = exp_m.group(1).strip()
 
@@ -640,8 +643,12 @@ Axis C (HH Income): 1=Homogeneous | 2=Bimodal Spread | 3=Full Spectrum
 Axis D (Background/Education): 1=Rigid Gatekeeping | 2=Adjacency Friendly | 3=Zero Barriers
 Axis E (Employment Context): 1=Single Status | 2=Hybrid Pool | 3=Gig/Volatile
 
-Sum scores (5–15). Set persona count at the appropriate point within the preset band:
-5–7=low end, 8–10=middle, 11–15=high end.
+Sum scores (5–15) and set the persona count strictly from the score within the preset band:
+- 3–4 band (corporate_professional): score ≤7 → 3 personas; score ≥8 → 4 personas.
+- 3–5 band (licensed_skilled): score ≤7 → 3; 8–11 → 4; ≥12 → 5.
+- 5–6 band (gig/hourly): score ≤9 → 5; ≥10 → 6.
+- 3 band (executive_specialist): always 3.
+GENERATE EXACTLY this many persona objects, and set target_persona_count to the same number. The personas array length MUST equal target_persona_count.
 
 CROSS-AXIS VALIDATION: If Axis B = 3, Axis A CANNOT = 1.
 
@@ -651,9 +658,9 @@ Include a Bridge Persona if AT LEAST 2 of these 4 signals are true:
 2. Flexible/short-term structure (contract, seasonal, part-time, gig)
 3. Economic vulnerability (wages at or below local median, or hourly pay)
 4. Broad applicant pool (accepts career changers, no niche experience required)
-If triggered: bridge persona REPLACES the lowest-percentage non-essential segment. Never adds an extra persona beyond the score-dictated count.
+If triggered: the bridge persona OCCUPIES ONE of the score-dictated persona slots — it does NOT change the total count. Still generate EXACTLY the score-dictated number of personas; one of them is simply the bridge. The bridge should be a MINORITY of the pool (roughly 15–25% segment_size_percentage), not co-equal with the core pools.
 
-CORPORATE / SENIOR BRIDGE (for corporate_professional and executive_specialist presets, where the 4 signals above rarely apply): include a bridge persona when a displaced senior-talent pool is plausible — e.g. an experienced director or manager from the same domain recently affected by layoffs or restructuring who would take this role as an immediate landing spot. They bring strong capability but carry elevated flight risk. Make that risk explicit in their anti_pattern_signals.churn_trigger (e.g. "leaves the moment a director-level seat opens elsewhere"). This bridge also REPLACES the weakest non-essential segment; it never adds beyond the score-dictated count.
+CORPORATE / SENIOR BRIDGE (for corporate_professional and executive_specialist presets, where the 4 signals above rarely apply): include a bridge persona when a displaced senior-talent pool is plausible — e.g. an experienced director or manager from the same domain recently affected by layoffs or restructuring who would take this role as an immediate landing spot. They bring strong capability but carry elevated flight risk. Make that risk explicit in their anti_pattern_signals.churn_trigger (e.g. "leaves the moment a director-level seat opens elsewhere"). This bridge is ONE of the score-dictated personas (it does not reduce the count) and should be ~15–25% of the pool.
 
 STEP 4 — GENERATE PERSONAS WITH MAXIMUM VARIANCE
 Maximize variance across personas on the highest-scoring axes. Personas that are minor demographic variations of each other are INVALID. Each must represent a genuinely distinct segment with different motivations, financial context, and life stage.
@@ -731,6 +738,10 @@ FIELD RICHNESS & HONESTY (V2):
 - screening_question: the high_risk_answer and risk_rationale must be concrete and role-specific, so a recruiter with no training can evaluate the answer.
 - recruiter_action: sourcing and conversion must be concrete and executable — specific platforms, example search filters, and example employer names as ILLUSTRATIONS — consistent with the role's market and currency.
 - PROOFREAD everything before returning. Correct spelling, correct brand and product names, no typos or garbled words. The job_ad_rewrite.recommended_headline in particular must be clean, correct, and free of errors.
+
+PERSONA QUALIFICATION (pools must actually qualify for the role):
+- MINIMUM EXPERIENCE: every persona must plausibly meet the JD's stated minimum experience. If the JD requires 8+ years (or "8 jaar"), do NOT create an early-career / junior-analyst persona whose age and background imply fewer years. Age ranges must be consistent with the required seniority.
+- INDUSTRY-NATIVE POOL: if the JD explicitly requires experience in a specific industry or function (e.g. staffing / recruitment / detachering, fintech, healthcare), at least one persona MUST come natively from that industry — that is usually the single best-fit pool, so prioritize it over generic adjacent pools.
 
 OUTPUT POLISH & HONESTY (V2.1 — enterprise quality):
 - ONE PERSONA PER DISTINCT POOL: if the JD describes distinct functional areas (e.g. campaign execution, creative studio / content operations, media planning, agency management), give each its own persona rather than merging them. A creative-studio/content-ops pool is distinct from a media-planning pool and from an agency-campaign-lead pool — if the JD covers all of them, prefer the upper end of the persona band so each is represented.
@@ -1343,10 +1354,20 @@ def build_persona_response(text: str = "", url: str = "", source: str = "job_des
     data = _normalize_segments(data)
     data = _scrub_internal_tokens(data)   # strip any leaked internal variable names
 
-    # Guarantee the posted salary shows even if the model omitted it from local_context.
+    # Guarantee the posted salary + location show even if the model omitted them.
     lc = data.get("local_context")
-    if isinstance(lc, dict) and not lc.get("posted_compensation") and signals.get("salary"):
-        lc["posted_compensation"] = signals["salary"]
+    if isinstance(lc, dict):
+        if not lc.get("posted_compensation") and signals.get("salary"):
+            lc["posted_compensation"] = signals["salary"]
+        if not lc.get("metro_area") and signals.get("location"):
+            lc["metro_area"] = signals["location"]
+
+    # Keep the displayed persona count consistent with the actual cards (no
+    # "score says 4 but only 3 cards" contradiction).
+    ds = data.get("diversity_scoring")
+    personas = data.get("personas")
+    if isinstance(ds, dict) and isinstance(personas, list) and personas:
+        ds["target_persona_count"] = len(personas)
 
     # Debug internals — only exposed when DEBUG_PIPELINE is enabled.
     if DEBUG_PIPELINE:
