@@ -259,6 +259,11 @@ OPENROUTER_KEY  = os.environ.get("OPENROUTER_API_KEY", "")
 # GitHub Models accepts a GitHub PAT; allow either env name.
 GITHUB_MODELS_KEY = os.environ.get("GITHUB_MODELS_TOKEN") or os.environ.get("GITHUB_TOKEN", "")
 
+# LLM output ceiling. Default 8000 fits gemini-2.0-flash's 8192 cap. To allow
+# fuller 6-persona maps, set GEMINI_MODEL=gemini-2.5-flash and LLM_MAX_TOKENS=16000.
+GEMINI_MODEL   = os.environ.get("GEMINI_MODEL", "gemini-2.0-flash")
+LLM_MAX_TOKENS = int(os.environ.get("LLM_MAX_TOKENS", "8000"))
+
 TIMEOUT = 20
 
 
@@ -1048,10 +1053,10 @@ def _call_gemini(prompt: str) -> str:
         "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
         headers={"Authorization": f"Bearer {GEMINI_KEY}", "Content-Type": "application/json"},
         json={
-            "model": "gemini-2.0-flash",
+            "model": GEMINI_MODEL,
             "messages": [{"role": "user", "content": prompt}],
             "temperature": 0.7,
-            "max_tokens": 8000,
+            "max_tokens": LLM_MAX_TOKENS,
             "response_format": {"type": "json_object"},
         },
         timeout=60,
@@ -1069,7 +1074,7 @@ def _call_groq(prompt: str) -> str:
             "model": "llama-3.3-70b-versatile",
             "messages": [{"role": "user", "content": prompt}],
             "temperature": 0.7,
-            "max_tokens": 8000,
+            "max_tokens": LLM_MAX_TOKENS,
             "response_format": {"type": "json_object"},
         },
         timeout=60,
@@ -1090,7 +1095,7 @@ def _call_openai_compatible(url: str, key: str, model: str, prompt: str, extra_h
             "model": model,
             "messages": [{"role": "user", "content": prompt}],
             "temperature": 0.7,
-            "max_tokens": 8000,
+            "max_tokens": LLM_MAX_TOKENS,
             "response_format": {"type": "json_object"},
         },
         timeout=60,
@@ -1295,11 +1300,15 @@ def validate_output(data: dict) -> dict:
     if not isinstance(data, dict):
         raise OutputValidationError("Model returned a non-object response.")
 
-    missing = [k for k in _REQUIRED_TOP_KEYS if k not in data]
-    if missing:
-        raise OutputValidationError(
-            f"Model response was missing required fields: {', '.join(missing)}."
-        )
+    # Only `personas` is truly essential. Backfill the rest so a truncated tail
+    # (e.g. a missing job_ad_rewrite on a large 6-persona map) degrades
+    # gracefully — the frontend renders these conditionally — instead of 502-ing.
+    data.setdefault("jd_hard_filters", {})
+    data.setdefault("role_summary", "")
+    data.setdefault("recruiter_brief", "")
+    data.setdefault("local_context", {})
+    data.setdefault("diversity_scoring", {})
+    data.setdefault("job_ad_rewrite", {})
 
     personas = data.get("personas")
     if not isinstance(personas, list) or not personas:
