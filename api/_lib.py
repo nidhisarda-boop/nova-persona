@@ -563,6 +563,8 @@ Include a Bridge Persona if AT LEAST 2 of these 4 signals are true:
 4. Broad applicant pool (accepts career changers, no niche experience required)
 If triggered: bridge persona REPLACES the lowest-percentage non-essential segment. Never adds an extra persona beyond the score-dictated count.
 
+CORPORATE / SENIOR BRIDGE (for corporate_professional and executive_specialist presets, where the 4 signals above rarely apply): include a bridge persona when a displaced senior-talent pool is plausible — e.g. an experienced director or manager from the same domain recently affected by layoffs or restructuring who would take this role as an immediate landing spot. They bring strong capability but carry elevated flight risk. Make that risk explicit in their anti_pattern_signals.churn_trigger (e.g. "leaves the moment a director-level seat opens elsewhere"). This bridge also REPLACES the weakest non-essential segment; it never adds beyond the score-dictated count.
+
 STEP 4 — GENERATE PERSONAS WITH MAXIMUM VARIANCE
 Maximize variance across personas on the highest-scoring axes. Personas that are minor demographic variations of each other are INVALID. Each must represent a genuinely distinct segment with different motivations, financial context, and life stage.
 
@@ -603,6 +605,13 @@ SELF-VALIDATION — Before returning output, check all of these. If any fail, re
 ✗ REJECT if all primary_motivations are variations of "flexibility and autonomy"
 ✗ REJECT if two or more personas share the same sourcing_channel.primary
 ✗ REJECT if gig role has no persona addressing vehicle access barrier or competing platform users
+
+FIELD RICHNESS & HONESTY (V2):
+- tech_profile.hardware_devices and key_apps: give specific, realistic examples for THIS segment (e.g. a digital marketer: "Figma", "Google Analytics 4", "Slack", "Asana"; a field gig worker: "budget Android phone", "Google Maps", "the platform app"). Treat these as ILLUSTRATIVE inferences, never as verified facts, and never build evidence claims on them.
+- household_income_note: explain the financial pressure or motivation implication for this segment (e.g. "moving from volatile agency bonuses to a predictable corporate base; motivated by stability and 401(k) match more than raw base") — do not merely restate the number.
+- screening_question: the high_risk_answer and risk_rationale must be concrete and role-specific, so a recruiter with no training can evaluate the answer.
+- recruiter_action: sourcing and conversion must be concrete and executable — specific platforms, example search filters, and example employer names as ILLUSTRATIONS — consistent with the role's market and currency.
+- PROOFREAD everything before returning. Correct spelling, correct brand and product names, no typos or garbled words. The job_ad_rewrite.recommended_headline in particular must be clean, correct, and free of errors.
 
 Return ONLY valid JSON. No markdown. No explanation."""
 
@@ -762,8 +771,10 @@ def _build_prompt(jd_text: str, signals: dict, onet: dict, wages: dict, demos: s
         "evidence_basis": ["string", "string"]
       },
       "screening_question": {
-        "question": "string — recommended interview question",
-        "why_it_matters": "string"
+        "question": "string — recommended diagnostic interview/onboarding question for THIS segment",
+        "high_risk_answer": "string — the response pattern that is a RED FLAG (e.g. focuses only on vanity metrics or short-term launch spikes)",
+        "risk_rationale": "string — why that answer predicts poor fit or early churn for THIS specific role",
+        "why_it_matters": "string — what a strong answer reveals"
       },
       "recruiter_action": {
         "sourcing_channel": {
