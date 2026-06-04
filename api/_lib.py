@@ -557,7 +557,8 @@ Identify the role's true operating center — exactly one of: Strategy-heavy | E
 Every persona MUST map to talent pools that fit this operating center as defined by the JD's ACTUAL responsibilities. Do NOT over-index on generic brand strategy, MBA ambition, or market research unless the JD explicitly emphasizes them. Example: if a JD centers on campaign execution, creative operations, media planning, and agency management, personas must come from campaign-execution, creative-ops, media/social, and agency-operator pools — not "market research analyst" or "MBA generalist".
 
 CRITICAL RULES FOR PERSONA GENERATION:
-- EVIDENCE INTEGRITY: evidence_basis, notes, and confidence fields may ONLY cite a source whose data was actually supplied in INPUT DATA (ONET_GROUNDING, MARKET_GROUNDING). NEVER invent source names such as "LinkedIn postings", "Glassdoor salary data", "Indeed insights", or "alumni placement data". If no external source was supplied, write exactly: "Inferred from JD requirements; external salary source not used."
+- EVIDENCE INTEGRITY: evidence_basis, notes, and confidence fields may ONLY cite a source whose data was actually supplied in INPUT DATA (STRUCTURED_JD, ONET_GROUNDING, MARKET_GROUNDING). NEVER invent source names such as "LinkedIn postings", "Glassdoor salary data", "Indeed insights", or "alumni placement data".
+- STRUCTURED_JD fields COUNT AS SOURCED. When salary or location came from STRUCTURED_JD, treat them as grounded: evidence_basis should say "Sourced from the job posting", salary/location are High confidence, and sourced_vs_inferred must state which facts came from the JD vs were inferred. Only when neither the JD nor an external source provided salary/location do you write "Inferred from JD requirements; external salary source not used" and keep overall_score ≤ 65.
 - Personas MUST be labor-market segments (real candidate pools with distinct backgrounds and paths to this role), NOT personality archetypes ("The Results Driver", "The Relationship Builder")
 - Each persona's archetype AND name must name a SOURCEABLE prior-background talent pool — a real group you could filter for on LinkedIn/Naukri by their last role, industry, or employer type (e.g. "Agency Campaign Operator", "CPG Brand Marketer", "Media-Agency Social Lead", "The Ad Ops Operator", "The SaaS CS Migrant")
 - BANNED as an archetype or name: functional skills or personality traits that EVERY candidate for this role would share — e.g. "Data-Driven", "Creative", "Storyteller", "Data-Driven Brand Builder", "Creative Storyteller", "Strategic Thinker", "Results-Driven", "Innovative". These are not distinct candidate pools and cannot be sourced. Litmus test: if you cannot rephrase the archetype as "their last role was X" or "they come from Y industry", it is INVALID — fix it before returning.
@@ -954,11 +955,13 @@ def _call_llm(prompt: str) -> str:
     user sees a clear "try again shortly" message instead of a generic 500.
     """
     # Fallback order: most generous/reliable free tiers first.
+    # Order = quality-first, with generous-free fallbacks behind it. Gemini leads
+    # because it produces stronger sociological segmentation than gpt-oss-120b.
     providers = []
-    if CEREBRAS_KEY:
-        providers.append(("cerebras", _call_cerebras))
     if GEMINI_KEY:
         providers.append(("gemini", _call_gemini))
+    if CEREBRAS_KEY:
+        providers.append(("cerebras", _call_cerebras))
     if GROQ_KEY:
         providers.append(("groq", _call_groq))
     if OPENROUTER_KEY:
