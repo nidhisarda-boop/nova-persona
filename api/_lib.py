@@ -821,16 +821,53 @@ def _detect_market(text: str, location: str = "") -> str:
     return "Global"
 
 
+def _market_from_url(url: str) -> str:
+    """Hint the market from the job board's domain / TLD when JD content is
+    ambiguous. Returns a market name or '' if no confident hint."""
+    if not url:
+        return ""
+    try:
+        host = (urllib.parse.urlparse(url).netloc or "").lower()
+    except Exception:
+        return ""
+    # Country-code TLDs are strong signals
+    if host.endswith((".nl", ".de", ".fr", ".es", ".it", ".be", ".ie", ".at", ".pt")):
+        return "EU"
+    if host.endswith((".co.uk", ".uk")):
+        return "UK"
+    if host.endswith((".in",)) or "naukri" in host or "instahyre" in host or "iimjobs" in host:
+        return "India"
+    if host.endswith((".ca",)):
+        return "Canada"
+    if host.endswith((".com.au", ".au")):
+        return "Australia"
+    # US-centric boards default to US (not India)
+    if any(b in host for b in ("ziprecruiter", "indeed.com", "dice.com", "monster.com",
+                               "greenhouse.io", "lever.co", "glassdoor.com")):
+        return "US"
+    return ""
+
+
 def _build_prompt(jd_text: str, signals: dict, onet: dict, wages: dict, demos: str,
                   fallback: bool, market: str = "Global") -> str:
     parts = [SYSTEM_PROMPT, "\n\n=== INPUT DATA ==="]
 
-    parts.append(
-        f"\nDETECTED_MARKET: {market}. CRITICAL: every currency and income figure in "
-        f"your output MUST be expressed in {_CURRENCY.get(market, 'the local currency')}. "
-        f"Do NOT use USD unless DETECTED_MARKET is US. Use local household-income tiers "
-        f"and salary conventions for this market (e.g. LPA for India)."
-    )
+    if market == "Global":
+        parts.append(
+            "\nDETECTED_MARKET: Global (undetermined). The market could NOT be determined "
+            "from the JD or URL. Do NOT default to India or any specific country — in "
+            "particular do NOT use ₹/INR or name Indian companies. Use USD ($) as a neutral "
+            "currency, US-style income tiers, and globally-recognizable employers, and note "
+            "in evidence that the location/market was not specified."
+        )
+    else:
+        parts.append(
+            f"\nDETECTED_MARKET: {market}. CRITICAL: every currency and income figure in "
+            f"your output MUST be expressed in {_CURRENCY.get(market, 'the local currency')}. "
+            f"Do NOT use USD unless DETECTED_MARKET is US. Name employers and sourcing "
+            f"channels native to this market. Use local household-income tiers and salary "
+            f"conventions (e.g. LPA for India, ZZP day-rates for EU/NL)."
+        )
 
     if fallback:
         parts.append(f"\nFALLBACK MODE: URL extraction failed. Inferred title: {signals.get('title', 'Unknown')}. Generate personas from title + industry heuristics.")
@@ -1362,6 +1399,9 @@ def build_persona_response(text: str = "", url: str = "", source: str = "job_des
 
     # Detect the role's market so we use the right currency and wage source
     market = _detect_market(jd_content, signals.get("location", ""))
+    if market == "Global":
+        # Fall back to the job board's domain/TLD before giving up on geo.
+        market = _market_from_url(url) or "Global"
     result["_pipeline"]["market"] = market
 
     # Stage 4: CareerOneStop wages — US-only (USD) source. Only use it for US
