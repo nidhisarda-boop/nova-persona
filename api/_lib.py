@@ -800,7 +800,7 @@ def _call_cerebras(prompt: str) -> str:
     return _call_openai_compatible(
         "https://api.cerebras.ai/v1/chat/completions",
         CEREBRAS_KEY,
-        os.environ.get("CEREBRAS_MODEL", "llama-3.3-70b"),
+        os.environ.get("CEREBRAS_MODEL", "gpt-oss-120b"),
         prompt,
     )
 
