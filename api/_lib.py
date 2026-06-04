@@ -940,7 +940,7 @@ def _call_gemini(prompt: str) -> str:
             "model": "gemini-2.0-flash",
             "messages": [{"role": "user", "content": prompt}],
             "temperature": 0.7,
-            "max_tokens": 6000,
+            "max_tokens": 8000,
             "response_format": {"type": "json_object"},
         },
         timeout=60,
@@ -958,7 +958,7 @@ def _call_groq(prompt: str) -> str:
             "model": "llama-3.3-70b-versatile",
             "messages": [{"role": "user", "content": prompt}],
             "temperature": 0.7,
-            "max_tokens": 6000,
+            "max_tokens": 8000,
             "response_format": {"type": "json_object"},
         },
         timeout=60,
@@ -979,7 +979,7 @@ def _call_openai_compatible(url: str, key: str, model: str, prompt: str, extra_h
             "model": model,
             "messages": [{"role": "user", "content": prompt}],
             "temperature": 0.7,
-            "max_tokens": 6000,
+            "max_tokens": 8000,
             "response_format": {"type": "json_object"},
         },
         timeout=60,
@@ -1120,17 +1120,32 @@ def _normalize_segments(data: dict) -> dict:
 
 
 def _parse_json(raw: str) -> dict:
-    """Extract and parse JSON from LLM response."""
-    # Try direct parse first
+    """Extract and parse JSON from an LLM response, repairing common malformations
+    (missing/trailing commas, truncated tails) that weaker models emit."""
+    # 1) Direct parse
     try:
         return json.loads(raw)
     except json.JSONDecodeError:
         pass
-    # Extract JSON block
+    # 2) Largest {...} block
     m = re.search(r"\{[\s\S]*\}", raw)
-    if m:
-        return json.loads(m.group())
-    raise ValueError(f"No valid JSON in LLM response. Preview: {raw[:300]}")
+    candidate = m.group() if m else raw
+    try:
+        return json.loads(candidate)
+    except json.JSONDecodeError:
+        pass
+    # 3) Repair malformed LLM JSON (missing commas, trailing commas, etc.)
+    try:
+        from json_repair import repair_json
+        obj = repair_json(candidate, return_objects=True)
+        if isinstance(obj, dict) and obj:
+            return obj
+    except Exception:
+        pass
+    # Clean, user-facing failure instead of a 500 stack trace.
+    raise OutputValidationError(
+        "The AI model returned a malformed response. Please try again."
+    )
 
 
 # Top-level keys the frontend depends on
