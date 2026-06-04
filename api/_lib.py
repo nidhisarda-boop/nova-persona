@@ -817,31 +817,15 @@ def _call_llm(prompt: str) -> str:
     def _is_rate_limit(e):
         return isinstance(e, requests.exceptions.HTTPError) and getattr(e.response, "status_code", None) == 429
 
-    def _reason(name, e):
-        code = getattr(getattr(e, "response", None), "status_code", None)
-        detail = ""
-        try:
-            err = e.response.json().get("error", {})
-            detail = err.get("status") or err.get("message") or ""
-        except Exception:
-            pass
-        if not detail:
-            try:
-                detail = e.response.text
-            except Exception:
-                detail = type(e).__name__
-        detail = re.sub(r"AIza[\w\-]+", "", str(detail))[:160]
-        return f"{name}:{code}:{detail}"
-    _dbg = " [" + " | ".join(_reason(name, e) for name, e in errors) + "]"
     if any(_is_rate_limit(e) for _, e in errors):
         raise LLMUnavailableError(
             "The AI model is receiving too many requests right now. "
-            "Please wait a minute and try again." + _dbg
+            "Please wait a minute and try again."
         )
     if any(isinstance(e, (requests.exceptions.Timeout, requests.exceptions.ConnectionError,
                           requests.exceptions.HTTPError)) for _, e in errors):
         raise LLMUnavailableError(
-            "The AI model is temporarily unavailable. Please try again in a moment." + _dbg
+            "The AI model is temporarily unavailable. Please try again in a moment."
         )
     # Unknown failure — re-raise so it surfaces (and gets logged) as a 500.
     raise errors[-1][1]
