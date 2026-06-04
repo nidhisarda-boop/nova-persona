@@ -753,6 +753,7 @@ function ConfidencePanel({ evidence_confidence }) {
   const {
     overall_score,
     sourced_vs_inferred,
+    confidence_breakdown,
     notes,
     evidence_basis,
   } = evidence_confidence;
@@ -792,6 +793,21 @@ function ConfidencePanel({ evidence_confidence }) {
           </div>
         )}
       </div>
+      {confidence_breakdown && (confidence_breakdown.high || confidence_breakdown.medium || confidence_breakdown.low) && (
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 8 }}>
+          {[
+            ["High", confidence_breakdown.high, "#10b981", "#ecfdf5"],
+            ["Medium", confidence_breakdown.medium, "#f59e0b", "#fffbeb"],
+            ["Low", confidence_breakdown.low, "#ef4444", "#fef2f2"],
+          ].map(([label, items, color, bg]) =>
+            items && items.length > 0 ? (
+              <span key={label} style={{ fontSize: 11, color, background: bg, border: `1px solid ${color}33`, borderRadius: 8, padding: "3px 9px", lineHeight: 1.4 }}>
+                <strong>{label}:</strong> {items.join(", ")}
+              </span>
+            ) : null
+          )}
+        </div>
+      )}
       {notes && (
         <div style={{ fontSize: 12, color: "#64748b", lineHeight: 1.5, marginBottom: 6 }}>
           {notes}
@@ -889,6 +905,22 @@ function buildSourcingPack(persona) {
   return lines.filter((l) => l !== undefined).join("\n").replace(/\n{3,}/g, "\n\n").trim();
 }
 
+function OutreachScript({ text }) {
+  const [copied, setCopied] = useState(false);
+  const copy = () => {
+    try { navigator.clipboard.writeText(text); setCopied(true); setTimeout(() => setCopied(false), 1500); } catch {}
+  };
+  return (
+    <div style={{ background: "#f0fdf4", border: "1px solid #bbf7d0", borderRadius: 8, padding: "8px 10px", marginBottom: 8 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
+        <span style={{ fontSize: 11, fontWeight: 700, color: "#15803d", textTransform: "uppercase", letterSpacing: 0.5 }}>✉️ Outreach script</span>
+        <MiniBtn onClick={copy}>{copied ? "✓ Copied" : "Copy"}</MiniBtn>
+      </div>
+      <div style={{ fontSize: 12.5, color: "#166534", lineHeight: 1.5 }}>{text}</div>
+    </div>
+  );
+}
+
 function ExportPackButton({ persona }) {
   const [done, setDone] = useState(false);
   const copy = () => {
@@ -899,7 +931,7 @@ function ExportPackButton({ persona }) {
 
 function PersonaCard({ persona, index, locked, onToggleLock }) {
   const color = ACCENT_COLORS[index % ACCENT_COLORS.length];
-  const { metadata, demographics, financials, drivers_and_friction, tech_profile, evidence_confidence, screening_question, recruiter_action } = persona;
+  const { metadata, demographics, financials, drivers_and_friction, tech_profile, evidence_confidence, screening_question, recruiter_action, deal_breakers, candidate_journey } = persona;
 
   return (
     <div style={S.card(color)}>
@@ -1160,6 +1192,42 @@ function PersonaCard({ persona, index, locked, onToggleLock }) {
           </div>
         )}
 
+        {/* Deal-breakers */}
+        {deal_breakers && deal_breakers.length > 0 && (
+          <div style={S.panel("#fff1f2", "#fecdd3")}>
+            <div style={{ ...S.panelTitle, color: "#be123c" }}>Deal-breakers</div>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+              {deal_breakers.map((d, i) => (
+                <span key={i} style={{ fontSize: 12, fontWeight: 600, color: "#be123c", background: "#fff", border: "1px solid #fecdd3", borderRadius: 999, padding: "3px 10px" }}>
+                  ⛔ {d}
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Candidate journey drop-off map */}
+        {candidate_journey && Object.values(candidate_journey).some((v) => v && String(v).trim()) && (
+          <div style={S.panel("#fff7ed", "#fed7aa")}>
+            <div style={{ ...S.panelTitle, color: "#c2410c" }}>Candidate journey — where they drop off</div>
+            {[
+              ["Discovery", candidate_journey.discovery_risk],
+              ["Click", candidate_journey.click_risk],
+              ["Apply", candidate_journey.apply_risk],
+              ["Interview", candidate_journey.interview_risk],
+              ["Offer", candidate_journey.offer_risk],
+              ["Early churn", candidate_journey.early_churn_risk],
+            ].map(([stage, risk]) =>
+              risk ? (
+                <div key={stage} style={{ fontSize: 12.5, color: "#7c2d12", lineHeight: 1.5, marginBottom: 4, display: "flex", gap: 6 }}>
+                  <span style={{ fontWeight: 700, minWidth: 84, color: "#9a3412" }}>{stage}:</span>
+                  <span>{risk}</span>
+                </div>
+              ) : null
+            )}
+          </div>
+        )}
+
         {/* Recruiter Action */}
         {recruiter_action && (
           <div style={S.panel("#faf5ff", "#d8b4fe")}>
@@ -1221,6 +1289,10 @@ function PersonaCard({ persona, index, locked, onToggleLock }) {
                   </div>
                 )}
               </div>
+            )}
+            {/* Outreach script (copyable) */}
+            {recruiter_action.outreach_script && (
+              <OutreachScript text={recruiter_action.outreach_script} />
             )}
             {/* Application drop-off risk + fix */}
             {recruiter_action.application_dropoff_risk?.risk && (
@@ -1426,6 +1498,28 @@ function DefinitionsPanel() {
           </div>
         </div>
       ))}
+    </div>
+  );
+}
+
+function MismatchBlock({ data }) {
+  if (!data || !(data.you_want || data.jd_attracts)) return null;
+  const Row = ({ label, value, color }) =>
+    value ? (
+      <div style={{ marginBottom: 6, fontSize: 13, lineHeight: 1.5 }}>
+        <span style={{ fontWeight: 700, color }}>{label} </span>
+        <span style={{ color: "#334155" }}>{value}</span>
+      </div>
+    ) : null;
+  return (
+    <div style={{ background: "#fffbeb", border: "1px solid #fde68a", borderRadius: 14, padding: "16px 18px", marginBottom: 20 }}>
+      <div style={{ fontSize: 13, fontWeight: 800, textTransform: "uppercase", letterSpacing: 0.6, color: "#b45309", marginBottom: 10 }}>
+        ⚖️ Who you want vs. who your JD attracts
+      </div>
+      <Row label="You want:" value={data.you_want} color="#0f766e" />
+      <Row label="Your JD attracts:" value={data.jd_attracts} color="#b45309" />
+      <Row label="Mismatch:" value={data.mismatch} color="#dc2626" />
+      <Row label="Fix:" value={data.fix} color="#166534" />
     </div>
   );
 }
@@ -1711,6 +1805,7 @@ export default function PersonaBuilder() {
         {result && !loading && result.page_type !== "search_results" && (
           <>
             <Banner data={result} />
+            <MismatchBlock data={result.persona_jd_mismatch} />
 
             {result.personas && result.personas.length > 0 && (
               <>
