@@ -1188,6 +1188,8 @@ function PersonaCard({ persona, index, locked, onToggleLock }) {
 
 function JobAdRewritePanel({ jaw }) {
   if (!jaw) return null;
+  // Don't render an empty section if the model omitted/truncated this block.
+  if (!Object.values(jaw).some((v) => v && String(v).trim())) return null;
 
   const cells = [
     {

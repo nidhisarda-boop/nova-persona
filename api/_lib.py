@@ -784,6 +784,7 @@ PERSONA QUALIFICATION (pools must actually qualify for the role):
 - EXPERIENCE IS NOT AGE: a years-of-experience requirement constrains seniority, NOT age — someone can have 3+ (even 8+) years by their late 20s/30s. Vary age ranges realistically and WIDELY across personas (e.g. 26–34, 32–45, 45–58). Do NOT cluster every persona in a near-retirement (50+) band. If all personas end up 50+, you have made an error — fix it.
 - NO OVERQUALIFIED OR EXOTIC POOLS: do not invent segments who would not realistically apply for this role — e.g. a PhD academic, a hobbyist/DIY homeowner, or a far-senior executive for a hands-on field/technician/hourly job. Every persona must be someone who would plausibly take THIS role.
 - INDUSTRY-NATIVE POOL: if the JD explicitly requires experience in a specific industry or function (e.g. staffing / recruitment / detachering, fintech, healthcare), at least one persona MUST come natively from that industry — that is usually the single best-fit pool, so prioritize it over generic adjacent pools.
+- COMPETITOR-TALENT FIRST (skilled trades / experienced roles): order the pools by fit. (1) people already doing this exact job, including at named competitors, should be the LARGEST persona; (2) adjacent field-service / route-based trades next (e.g. HVAC, appliance/pool service, facilities, lawn/landscaping applicators); (3) then a bridge. Do NOT lead with niche or exotic pools.
 
 OUTPUT POLISH & HONESTY (V2.1 — enterprise quality):
 - ONE PERSONA PER DISTINCT POOL: if the JD describes distinct functional areas (e.g. campaign execution, creative studio / content operations, media planning, agency management), give each its own persona rather than merging them. A creative-studio/content-ops pool is distinct from a media-planning pool and from an agency-campaign-lead pool — if the JD covers all of them, prefer the upper end of the persona band so each is represented.
@@ -967,6 +968,14 @@ def _build_prompt(jd_text: str, signals: dict, onet: dict, wages: dict, demos: s
     "bridge_persona_included": false,
     "bridge_signals_present": 0
   },
+  "job_ad_rewrite": {
+    "current_jd_risk": "string",
+    "missing_motivator": "string",
+    "recommended_headline": "string",
+    "bullet_to_add": "string",
+    "bullet_to_remove": "string",
+    "cta_improvement": "string"
+  },
   "personas": [
     {
       "metadata": {
@@ -1034,15 +1043,7 @@ def _build_prompt(jd_text: str, signals: dict, onet: dict, wages: dict, demos: s
         "funnel_friction_killer": "string — exact application process change"
       }
     }
-  ],
-  "job_ad_rewrite": {
-    "current_jd_risk": "string",
-    "missing_motivator": "string",
-    "recommended_headline": "string",
-    "bullet_to_add": "string",
-    "bullet_to_remove": "string",
-    "cta_improvement": "string"
-  }
+  ]
 }'''
     parts.append(schema)
     return "\n".join(parts)
