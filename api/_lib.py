@@ -237,6 +237,10 @@ CAREERONESTOP_TOKEN = os.environ.get("CAREERONESTOP_TOKEN", "")
 TAVILY_KEY      = os.environ.get("TAVILY_API_KEY", "")
 GEMINI_KEY      = os.environ.get("GEMINI_API_KEY", "")
 GROQ_KEY        = os.environ.get("GROQ_API_KEY", "")
+CEREBRAS_KEY    = os.environ.get("CEREBRAS_API_KEY", "")
+OPENROUTER_KEY  = os.environ.get("OPENROUTER_API_KEY", "")
+# GitHub Models accepts a GitHub PAT; allow either env name.
+GITHUB_MODELS_KEY = os.environ.get("GITHUB_MODELS_TOKEN") or os.environ.get("GITHUB_TOKEN", "")
 
 TIMEOUT = 20
 
@@ -770,22 +774,87 @@ def _call_groq(prompt: str) -> str:
     return resp.json()["choices"][0]["message"]["content"]
 
 
+def _call_openai_compatible(url: str, key: str, model: str, prompt: str, extra_headers: dict = None) -> str:
+    """Generic caller for any OpenAI-compatible /chat/completions endpoint."""
+    headers = {"Authorization": f"Bearer {key}", "Content-Type": "application/json"}
+    if extra_headers:
+        headers.update(extra_headers)
+    resp = requests.post(
+        url,
+        headers=headers,
+        json={
+            "model": model,
+            "messages": [{"role": "user", "content": prompt}],
+            "temperature": 0.7,
+            "max_tokens": 6000,
+            "response_format": {"type": "json_object"},
+        },
+        timeout=60,
+    )
+    resp.raise_for_status()
+    return resp.json()["choices"][0]["message"]["content"]
+
+
+def _call_cerebras(prompt: str) -> str:
+    """Cerebras — fast Llama 3.3 70B, generous free tier (1M tokens/day)."""
+    return _call_openai_compatible(
+        "https://api.cerebras.ai/v1/chat/completions",
+        CEREBRAS_KEY,
+        os.environ.get("CEREBRAS_MODEL", "llama-3.3-70b"),
+        prompt,
+    )
+
+
+def _call_openrouter(prompt: str) -> str:
+    """OpenRouter — aggregator with free models."""
+    return _call_openai_compatible(
+        "https://openrouter.ai/api/v1/chat/completions",
+        OPENROUTER_KEY,
+        os.environ.get("OPENROUTER_MODEL", "meta-llama/llama-3.3-70b-instruct:free"),
+        prompt,
+        extra_headers={
+            "HTTP-Referer": "https://nova-persona.vercel.app",
+            "X-Title": "Nova Candidate Map",
+        },
+    )
+
+
+def _call_github(prompt: str) -> str:
+    """GitHub Models — free with a GitHub token."""
+    return _call_openai_compatible(
+        os.environ.get("GITHUB_MODELS_URL", "https://models.github.ai/inference/chat/completions"),
+        GITHUB_MODELS_KEY,
+        os.environ.get("GITHUB_MODELS_MODEL", "openai/gpt-4o-mini"),
+        prompt,
+    )
+
+
 def _call_llm(prompt: str) -> str:
-    """Gemini Flash → Groq fallback, with graceful handling of upstream rate limits.
+    """Multi-provider fallback chain, with graceful handling of upstream rate limits.
 
     Tries each configured provider; on a 429 it retries once, honoring the
     provider's Retry-After header (capped at 5s). If every provider is
     rate-limited or unavailable, raises LLMUnavailableError (→ HTTP 503) so the
     user sees a clear "try again shortly" message instead of a generic 500.
     """
-    if not GEMINI_KEY and not GROQ_KEY:
-        raise RuntimeError("No LLM key configured. Set GEMINI_API_KEY or GROQ_API_KEY.")
-
+    # Fallback order: most generous/reliable free tiers first.
     providers = []
+    if CEREBRAS_KEY:
+        providers.append(("cerebras", _call_cerebras))
     if GEMINI_KEY:
         providers.append(("gemini", _call_gemini))
     if GROQ_KEY:
         providers.append(("groq", _call_groq))
+    if OPENROUTER_KEY:
+        providers.append(("openrouter", _call_openrouter))
+    if GITHUB_MODELS_KEY:
+        providers.append(("github", _call_github))
+
+    if not providers:
+        raise RuntimeError(
+            "No LLM key configured. Set one of CEREBRAS_API_KEY, GEMINI_API_KEY, "
+            "GROQ_API_KEY, OPENROUTER_API_KEY, or GITHUB_MODELS_TOKEN."
+        )
 
     errors = []
     for name, fn in providers:
