@@ -2,15 +2,22 @@ import sys, os, json
 import time
 from collections import defaultdict, deque
 sys.path.insert(0, os.path.dirname(__file__))
+import requests
 from _lib import build_persona_response, SafetyError
 from http.server import BaseHTTPRequestHandler
 
-# --- Rate limiting (in-memory, per warm instance) ---
+# --- Rate limiting -----------------------------------------------------------
 RATE_LIMIT_MAX    = int(os.environ.get("RATE_LIMIT_MAX", "10"))     # requests
 RATE_LIMIT_WINDOW = int(os.environ.get("RATE_LIMIT_WINDOW", "60"))  # seconds
-_hits = defaultdict(deque)  # ip -> deque[timestamps]
 
-def _rate_limited(ip):
+# Vercel KV / Upstash Redis REST (set automatically by the Vercel KV integration)
+_KV_URL   = os.environ.get("KV_REST_API_URL")   or os.environ.get("UPSTASH_REDIS_REST_URL")
+_KV_TOKEN = os.environ.get("KV_REST_API_TOKEN") or os.environ.get("UPSTASH_REDIS_REST_TOKEN")
+
+# In-memory fallback (per warm instance) — used only when KV is not configured
+_hits = defaultdict(deque)
+
+def _rate_limited_memory(ip):
     now = time.time()
     q = _hits[ip]
     while q and q[0] <= now - RATE_LIMIT_WINDOW:
@@ -22,6 +29,31 @@ def _rate_limited(ip):
         for k in [k for k, v in _hits.items() if not v]:
             del _hits[k]
     return False
+
+def _rate_limited_kv(ip):
+    """Durable fixed-window counter in Redis. Returns True if over the limit.
+    On any KV/network error, fail open to the in-memory limiter so a KV outage
+    never takes the endpoint down."""
+    try:
+        bucket = int(time.time() // RATE_LIMIT_WINDOW)
+        key = f"rl:{ip}:{bucket}"
+        # Pipeline: INCR the counter, then set TTL only if not already set (NX).
+        r = requests.post(
+            f"{_KV_URL}/pipeline",
+            headers={"Authorization": f"Bearer {_KV_TOKEN}"},
+            json=[["INCR", key], ["EXPIRE", key, str(RATE_LIMIT_WINDOW * 2), "NX"]],
+            timeout=2,
+        )
+        r.raise_for_status()
+        count = int(r.json()[0]["result"])
+        return count > RATE_LIMIT_MAX
+    except Exception:
+        return _rate_limited_memory(ip)
+
+def _rate_limited(ip):
+    if _KV_URL and _KV_TOKEN:
+        return _rate_limited_kv(ip)
+    return _rate_limited_memory(ip)
 
 class handler(BaseHTTPRequestHandler):
     def do_OPTIONS(self):
