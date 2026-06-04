@@ -2,7 +2,7 @@
 Nova Candidate Map — v3 backend
 Pipeline: Jina → O*NET → CareerOneStop → Tavily → Gemini/Groq → normalize
 """
-import os, re, json, time, urllib.parse, socket, ipaddress
+import os, re, json, time, urllib.parse, socket, ipaddress, html
 import requests
 
 
@@ -293,10 +293,59 @@ def _extract_jina_title(content: str) -> str:
     return title if re.search(r"[A-Za-z]{2,}", title) else ""
 
 
+def _greenhouse_ids(url: str):
+    """Pull (board_token, job_id) from a Greenhouse URL, else (None, None)."""
+    m = re.search(r"greenhouse\.io/(?:embed/job_app\?for=)?([\w-]+)/jobs/(\d+)", url)
+    if m:
+        return m.group(1), m.group(2)
+    m = re.search(r"greenhouse\.io/embed/job_app\?for=([\w-]+).*?[?&](?:token|gh_jid)=(\d+)", url)
+    if m:
+        return m.group(1), m.group(2)
+    return None, None
+
+
+def _fetch_greenhouse(board: str, job_id: str) -> str:
+    """Fetch a Greenhouse posting via its public board API — returns clean full JD
+    text (the human page is a JS shell Jina cannot read)."""
+    r = requests.get(
+        f"https://boards-api.greenhouse.io/v1/boards/{board}/jobs/{job_id}",
+        headers={"Accept": "application/json"},
+        timeout=TIMEOUT,
+    )
+    r.raise_for_status()
+    d = r.json()
+    title = d.get("title", "") or ""
+    loc = ((d.get("location") or {}).get("name") or "").strip()
+    body = d.get("content", "") or ""
+    # Greenhouse double-escapes HTML; unescape twice, then strip tags.
+    body = html.unescape(html.unescape(body))
+    body = re.sub(r"<\s*(br|/p|/li|/h\d)\s*>", "\n", body, flags=re.IGNORECASE)
+    body = re.sub(r"<[^>]+>", " ", body)
+    body = re.sub(r"[ \t]+", " ", body)
+    body = re.sub(r"\n[ \t]*\n+", "\n\n", body).strip()
+    header = f"Title: {title}\n"
+    if loc:
+        header += f"Work Location: {loc}\n"
+    return f"{header}\n{body}".strip()
+
+
 def _fetch_url(url: str) -> dict:
-    """Fetch job posting via Jina Reader. Returns {content, fallback_triggered, inferred_title}.
-    Retries once on thin content (Jina can be flaky without an API key), and prefers
-    the page's own title over the URL slug."""
+    """Fetch job posting. Prefers ATS-native APIs (Greenhouse) for clean structured
+    content, falls back to Jina Reader. Returns {content, fallback_triggered, inferred_title}."""
+    # ATS-specific: Greenhouse public API returns the full, clean JD as JSON.
+    board, job_id = _greenhouse_ids(url)
+    if board and job_id:
+        try:
+            gh = _fetch_greenhouse(board, job_id)
+            if len(gh) >= 200:
+                return {
+                    "content": gh,
+                    "fallback_triggered": False,
+                    "inferred_title": _extract_jina_title(gh) or _extract_title_from_url(url),
+                }
+        except Exception:
+            pass  # fall through to Jina
+
     content = ""
     for attempt in (1, 2):
         try:
