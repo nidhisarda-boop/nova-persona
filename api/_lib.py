@@ -824,8 +824,13 @@ def _call_llm(prompt: str) -> str:
             err = e.response.json().get("error", {})
             detail = err.get("status") or err.get("message") or ""
         except Exception:
-            detail = type(e).__name__
-        detail = re.sub(r"AIza[\w\-]+", "", str(detail))[:120]
+            pass
+        if not detail:
+            try:
+                detail = e.response.text
+            except Exception:
+                detail = type(e).__name__
+        detail = re.sub(r"AIza[\w\-]+", "", str(detail))[:160]
         return f"{name}:{code}:{detail}"
     _dbg = " [" + " | ".join(_reason(name, e) for name, e in errors) + "]"
     if any(_is_rate_limit(e) for _, e in errors):
