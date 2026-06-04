@@ -218,10 +218,23 @@ def _is_repetitive_garbage(text: str) -> bool:
     # Very few distinct characters across the whole input → garbage.
     if len(set(text.lower())) < 10:
         return True
+    # Mostly non-letters (numeric dumps, code, ID lists, symbol junk).
+    # Uses Unicode-aware isalpha so non-Latin scripts (e.g. Hindi JDs) count.
+    if sum(c.isalpha() for c in text) / len(text) < 0.35:
+        return True
     # A very long run of a single repeated character → garbage.
     if re.search(r"(.)\1{49,}", text):
         return True
     return False
+
+
+def _is_invalid_title(title: str) -> bool:
+    """True if an inferred title is unusable for persona generation — empty or
+    containing no alphabetic characters (e.g. a numeric job ID like 8574881002).
+    Single real words ('Driver', 'Bartender') are intentionally allowed."""
+    if not title or not title.strip():
+        return True
+    return not any(c.isalpha() for c in title)
 
 
 def _check_injection(text: str) -> str | None:
@@ -496,7 +509,17 @@ Read the full JD and extract these constraints. Every persona you generate MUST 
 6. required_tools_metrics: specific tools, platforms, or metrics named (e.g. "CPA, CPC, CTR, CPH, NRR", "Salesforce", "programmatic")
 7. explicit_disqualifiers: anything the JD says or implies will cause failure (e.g. "not for people who treat AM as status reporting", "on-site is non-negotiable", "night shift flexibility required")
 
+STEP 0.5 — COMPENSATION & LOCATION ANCHOR (the JD overrides all benchmark data)
+- If the JD states a salary or salary range, that IS the primary compensation anchor. Derive household_income_range, target_monthly_income_from_role (gross monthly ≈ annual ÷ 12), and the income tier from it. Do NOT replace it with national/median benchmark numbers.
+- If the JD names a specific city/metro, use THAT as metro_area and calibrate cost_of_living_index to that city (e.g. New York, San Francisco = Very High). Never collapse a specific city into a national aggregate.
+- Any MARKET_GROUNDING wage data provided below is a SECONDARY benchmark only. It must never override an explicit JD salary or a JD-stated location.
+
+STEP 0.6 — OPERATING CENTER (classify before generating personas)
+Identify the role's true operating center — exactly one of: Strategy-heavy | Execution-heavy | Sales/client-heavy | Analytics-heavy | Creative/production-heavy | Operations-heavy.
+Every persona MUST map to talent pools that fit this operating center as defined by the JD's ACTUAL responsibilities. Do NOT over-index on generic brand strategy, MBA ambition, or market research unless the JD explicitly emphasizes them. Example: if a JD centers on campaign execution, creative operations, media planning, and agency management, personas must come from campaign-execution, creative-ops, media/social, and agency-operator pools — not "market research analyst" or "MBA generalist".
+
 CRITICAL RULES FOR PERSONA GENERATION:
+- EVIDENCE INTEGRITY: evidence_basis, notes, and confidence fields may ONLY cite a source whose data was actually supplied in INPUT DATA (ONET_GROUNDING, MARKET_GROUNDING). NEVER invent source names such as "LinkedIn postings", "Glassdoor salary data", "Indeed insights", or "alumni placement data". If no external source was supplied, write exactly: "Inferred from JD requirements; external salary source not used."
 - Personas MUST be labor-market segments (real candidate pools with distinct backgrounds and paths to this role), NOT personality archetypes ("The Results Driver", "The Relationship Builder")
 - Each persona's archetype must reference their ACTUAL PRIOR BACKGROUND (e.g. "The Ad Ops Operator", "The SaaS CS Migrant", "The Recruitment Tech AM")
 - Churn triggers and interview red flags MUST reflect the JD's hard constraints (shift, on-site, metrics depth, escalation pressure) — not generic dissatisfaction
@@ -650,7 +673,10 @@ def _build_prompt(jd_text: str, signals: dict, onet: dict, wages: dict, demos: s
             f"75th percentile: ${wages.get('percentile_75','?')} "
             f"({wages.get('location','')}"
         )
-        parts.append(f"\nMARKET_GROUNDING.salary_bounds: {salary_str}")
+        parts.append(
+            f"\nMARKET_GROUNDING.salary_bounds (SECONDARY benchmark only — a US national "
+            f"aggregate; if the JD states its own salary/location, prefer the JD): {salary_str}"
+        )
     if demos:
         parts.append(f"\nMARKET_GROUNDING.demographic_signals:\n{demos}")
 
@@ -1096,6 +1122,14 @@ def build_persona_response(text: str = "", url: str = "", source: str = "job_des
     if inferred_title:
         signals["title"] = signals.get("title") or inferred_title
     result["_pipeline"]["signals"] = signals
+
+    # Hard guard: in fallback mode we rely entirely on the title, so never
+    # generate personas from a junk/numeric title (e.g. a Greenhouse job ID).
+    if fallback and _is_invalid_title(signals.get("title", "")):
+        raise SafetyError(
+            "We couldn't extract the job description from that URL. "
+            "Please paste the full job description text instead."
+        )
 
     # Stage 3: O*NET grounding
     onet = _onet_grounding(signals.get("title", ""))
