@@ -556,7 +556,7 @@ def _extract_signals(text: str) -> dict:
     # Location — prefer an explicitly labeled line, else first "City, ST/Country"
     loc_label = re.search(
         r"(?:work location|location|based in|office)\s*[:\-]\s*"
-        r"([A-Z][A-Za-z]+(?:[ /][A-Z][A-Za-z]+){0,4}(?:,\s*[A-Z][A-Za-z]+(?:\s[A-Z][A-Za-z]+)?)?)",
+        r"([A-Z][A-Za-z]+(?:(?:\s*/\s*|\s)[A-Z][A-Za-z]+){0,4}(?:,\s*[A-Z][A-Za-z]+(?:\s[A-Z][A-Za-z]+)?)?)",
         text, re.IGNORECASE,
     )
     if loc_label:
