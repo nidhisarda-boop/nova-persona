@@ -1173,6 +1173,97 @@ function JobAdRewritePanel({ jaw }) {
 
 // ─── Main Component ───────────────────────────────────────────────────────────
 
+const DEFINITIONS = [
+  {
+    group: "Persona Scores",
+    items: [
+      ["Segment Size %", "The share of the qualified candidate pool this persona represents. All personas in a map add up to 100%."],
+      ["Archetype", "A short label for the persona's real prior background and path into the role (e.g. \"Agency Campaign Operator\") — not a personality type."],
+      ["Tech Savviness (out of 5)", "How comfortable this segment is with digital tools. 1 = minimal, needs assisted use · 2 = basic apps · 3 = confident everyday user · 4 = advanced, multi-tool · 5 = highly technical power user."],
+      ["Evidence Confidence (0–100%)", "How well-supported this persona is by the JD and any external data. High ≥ 75% · Medium 50–74% · Low < 50%. Lower scores mean more of the persona is inferred."],
+      ["Salary / Education / Demographic Confidence", "Confidence in that specific dimension — High, Medium, or Low — based on whether it came from the JD/data or was inferred."],
+    ],
+  },
+  {
+    group: "Financial Terms",
+    items: [
+      ["Household Income Tier", "Where the persona's household sits on the local income scale: Lower · Lower-middle · Middle · Upper-middle · Upper. Bands are calibrated to the role's country and cost of living (US Pew tiers for US roles, local tiers for India/UK)."],
+      ["Income Dependency", "How much this role's pay matters to the household. Primary = main or sole income · Secondary = a second household income · Supplemental = a top-up to other earnings."],
+      ["Target Monthly Income", "The gross monthly pay this segment expects from the role, anchored to the JD's stated salary when available."],
+      ["Payment Preference", "How and how often the segment prefers to be paid (e.g. Daily instant, Weekly, Monthly) — most relevant for gig and hourly roles."],
+    ],
+  },
+  {
+    group: "How Segments Are Built",
+    items: [
+      ["5-Axis Score", "Each map is scored 1–3 on five axes; the total (5–15) sets how many personas are generated. A higher total means a more varied candidate market and more personas."],
+      ["Axis A — Motivational Diversity", "How varied candidates' reasons for taking the role are (1 = one shared motive, 3 = many competing motives)."],
+      ["Axis B — Age / Life Stage", "How many distinct life stages apply (1 = one band, 3 = all generations)."],
+      ["Axis C — Household Income", "How spread out candidate incomes are (1 = uniform, 3 = full spectrum)."],
+      ["Axis D — Background / Education", "How open the role is to different backgrounds (1 = strict gatekeeping, 3 = no barriers)."],
+      ["Axis E — Employment Context", "Stability of the work type (1 = single stable status, 3 = gig or volatile)."],
+      ["Bridge Persona", "An extra crossover segment, included only when the role is broadly accessible (low barrier + flexible structure + economic accessibility + wide applicant pool). It replaces the weakest segment rather than adding one."],
+    ],
+  },
+  {
+    group: "Recruiter Fields",
+    items: [
+      ["Interview Red Flag", "What this candidate might say that signals a high risk of quitting within 30 days."],
+      ["Churn Trigger", "The single operational change (shift, on-site rule, pay timing) most likely to make this segment disengage or ghost."],
+      ["Screening Question", "A recommended interview or onboarding question tuned to this segment's specific risk."],
+      ["Conversion Hook", "The exact headline and value proposition most likely to get this segment to apply."],
+      ["Sourcing Channel", "Where to actually find this segment — market-specific platforms (e.g. Naukri/Instahyre for India, LinkedIn/Indeed for the US)."],
+    ],
+  },
+];
+
+function DefinitionsPanel() {
+  return (
+    <div style={{ maxWidth: 860, margin: "0 auto" }}>
+      <div style={{ fontSize: 22, fontWeight: 800, color: "#1e293b", marginBottom: 6 }}>
+        How to read this map
+      </div>
+      <p style={{ color: "#64748b", fontSize: 14, marginBottom: 24 }}>
+        Definitions for the scores and terms used across each persona.
+      </p>
+      {DEFINITIONS.map((sec) => (
+        <div key={sec.group} style={{ marginBottom: 26 }}>
+          <div
+            style={{
+              fontSize: 12,
+              fontWeight: 800,
+              textTransform: "uppercase",
+              letterSpacing: 0.6,
+              color: "#6366f1",
+              marginBottom: 10,
+            }}
+          >
+            {sec.group}
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            {sec.items.map(([term, def]) => (
+              <div
+                key={term}
+                style={{
+                  background: "#fff",
+                  border: "1px solid #e2e8f0",
+                  borderRadius: 10,
+                  padding: "12px 16px",
+                }}
+              >
+                <div style={{ fontWeight: 700, color: "#1e293b", fontSize: 14, marginBottom: 3 }}>
+                  {term}
+                </div>
+                <div style={{ color: "#475569", fontSize: 13.5, lineHeight: 1.5 }}>{def}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export default function PersonaBuilder() {
   const [url, setUrl] = useState("");
   const [pasteMode, setPasteMode] = useState(false);
@@ -1182,6 +1273,7 @@ export default function PersonaBuilder() {
   const [result, setResult] = useState(null);
   const [error, setError] = useState(null);
   const [lockedCards, setLockedCards] = useState({});
+  const [tab, setTab] = useState("map");
 
   const stepIntervalRef = { current: null };
 
@@ -1273,6 +1365,35 @@ export default function PersonaBuilder() {
       </header>
 
       <main style={S.main}>
+        {/* Tab bar */}
+        <div style={{ display: "flex", gap: 8, marginBottom: 20 }}>
+          {[
+            ["map", "Persona Map"],
+            ["definitions", "Definitions"],
+          ].map(([key, label]) => (
+            <button
+              key={key}
+              onClick={() => setTab(key)}
+              style={{
+                padding: "8px 18px",
+                borderRadius: 999,
+                border: "1px solid " + (tab === key ? "#6366f1" : "#cbd5e1"),
+                background: tab === key ? "#6366f1" : "#fff",
+                color: tab === key ? "#fff" : "#475569",
+                fontWeight: 700,
+                fontSize: 14,
+                cursor: "pointer",
+              }}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+
+        {tab === "definitions" ? (
+          <DefinitionsPanel />
+        ) : (
+        <>
         {/* Input Card */}
         <div style={S.inputCard}>
           {/* Toggle */}
@@ -1410,6 +1531,8 @@ export default function PersonaBuilder() {
 
             <JobAdRewritePanel jaw={result.job_ad_rewrite} />
           </>
+        )}
+        </>
         )}
       </main>
     </div>
