@@ -992,15 +992,37 @@ function PersonaCard({ persona, index, locked, onToggleLock }) {
         {/* Evidence & Confidence */}
         <ConfidencePanel evidence_confidence={evidence_confidence} />
 
-        {/* Screening Question */}
+        {/* Screening Diagnostic */}
         {screening_question?.question && (
           <div style={S.panel("#eff6ff", "#bfdbfe")}>
             <div style={{ ...S.panelTitle, color: "#1d4ed8" }}>
-              Screening Question
+              Screening Diagnostic
             </div>
-            <div style={{ fontSize: 13, fontWeight: 700, color: "#1e293b", marginBottom: 6, lineHeight: 1.4 }}>
+            <div style={{ fontSize: 13, fontWeight: 700, color: "#1e293b", marginBottom: 8, lineHeight: 1.4 }}>
               "{screening_question.question}"
             </div>
+            {screening_question.high_risk_answer && (
+              <div
+                style={{
+                  fontSize: 12,
+                  color: "#9a3412",
+                  background: "#fff7ed",
+                  border: "1px solid #fed7aa",
+                  borderRadius: 8,
+                  padding: "8px 10px",
+                  marginBottom: 6,
+                  lineHeight: 1.5,
+                }}
+              >
+                🚩 <strong>High-risk answer:</strong> {screening_question.high_risk_answer}
+              </div>
+            )}
+            {screening_question.risk_rationale && (
+              <div style={{ fontSize: 12, color: "#64748b", marginBottom: 6, lineHeight: 1.5 }}>
+                <strong style={{ color: "#475569" }}>Why it's a risk: </strong>
+                {screening_question.risk_rationale}
+              </div>
+            )}
             {screening_question.why_it_matters && (
               <div style={{ fontSize: 12, color: "#3b82f6", lineHeight: 1.5 }}>
                 💡 {screening_question.why_it_matters}
@@ -1191,7 +1213,7 @@ const DEFINITIONS = [
     items: [
       ["Interview Red Flag", "What this candidate might say that signals a high risk of quitting within 30 days."],
       ["Churn Trigger", "The single operational change (shift, on-site rule, pay timing) most likely to make this segment disengage or ghost."],
-      ["Screening Question", "A recommended interview or onboarding question tuned to this segment's specific risk."],
+      ["Screening Diagnostic", "A recommended question tuned to this segment, plus the high-risk answer to listen for (the red flag), why that answer predicts poor fit, and what a strong answer reveals — so anyone can evaluate the response, not just a trained interviewer."],
       ["Conversion Hook", "The exact headline and value proposition most likely to get this segment to apply."],
       ["Sourcing Channel", "Where to actually find this segment — market-specific platforms (e.g. Naukri/Instahyre for India, LinkedIn/Indeed for the US)."],
     ],
