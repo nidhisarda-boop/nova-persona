@@ -3,7 +3,7 @@ import time
 from collections import defaultdict, deque
 sys.path.insert(0, os.path.dirname(__file__))
 import requests
-from _lib import build_persona_response, SafetyError, OutputValidationError, LLMUnavailableError
+from _lib import build_persona_response, SafetyError, OutputValidationError, LLMUnavailableError, SearchPageError
 from http.server import BaseHTTPRequestHandler
 
 # --- Rate limiting -----------------------------------------------------------
@@ -98,11 +98,27 @@ class handler(BaseHTTPRequestHandler):
             body   = json.loads(raw_body or b'{}')
             text   = body.get("text", "").strip()
             url    = body.get("url", "").strip()
+            mode   = (body.get("mode") or "job_description").strip()
             if not text and not url:
                 self._json({"error": "Please provide a job posting URL or paste the job description text."}, 400)
                 return
-            result = build_persona_response(text=text, url=url)
+            result = build_persona_response(text=text, url=url, mode=mode)
             self._json(result)
+        except SearchPageError as e:
+            # Not an error — a job-search/category page. Offer the user a choice.
+            label = e.role_hint or "this role category"
+            mkt = "" if e.market in ("", "Global") else f" ({e.market})"
+            self._json({
+                "page_type": "search_results",
+                "role_hint": e.role_hint,
+                "market": e.market,
+                "message": "That link is a job-search results page, not a single job posting.",
+                "options": [
+                    {"id": "market_map", "label": f"Generate a general market map for “{label}”{mkt}"},
+                    {"id": "pick_job", "label": "Open a specific job from the results and paste that link"},
+                    {"id": "paste", "label": "Paste the full job description text"},
+                ],
+            }, 200)
         except SafetyError as e:
             # User-facing input validation error — 400
             self._json({"error": str(e), "error_type": "input_validation"}, 400)

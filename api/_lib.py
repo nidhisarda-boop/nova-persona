@@ -25,6 +25,16 @@ class LLMUnavailableError(RuntimeError):
     pass
 
 
+class SearchPageError(Exception):
+    """Raised when a URL is a job-search/category results page, not a single
+    posting. Surfaced as a 200 with page_type=search_results + a mode chooser,
+    NOT an error — the user picks: market map / pick a job / paste JD."""
+    def __init__(self, role_hint: str = "", market: str = "Global"):
+        self.role_hint = role_hint
+        self.market = market
+        super().__init__("search_results_page")
+
+
 # When false (default/production), internal pipeline fields are stripped from the
 # response so they never reach the browser. Set DEBUG_PIPELINE=1 to expose them.
 DEBUG_PIPELINE = os.environ.get("DEBUG_PIPELINE", "").lower() in ("1", "true", "yes", "on")
@@ -322,6 +332,26 @@ def _looks_like_search_page(url: str, content: str) -> bool:
         if pays >= 6 and (applies >= 5 or titles >= 4):
             return True
     return False
+
+
+def _role_cluster_from_url(url: str) -> str:
+    """Pull a role-category label from a search/category URL — the title-cased
+    slug (ziprecruiter /Jobs/Blue-Collar-Worker) or the q=/keyword= query."""
+    try:
+        parsed = urllib.parse.urlparse(url or "")
+    except Exception:
+        return ""
+    m = re.search(r"/Jobs?/([^/?#]+)", url or "", re.IGNORECASE)
+    if m:
+        slug = re.sub(r"[-_+]+", " ", m.group(1)).strip()
+        slug = re.sub(r"\b(jobs?|careers?|hiring|near me)\b", "", slug, flags=re.IGNORECASE).strip()
+        if re.search(r"[A-Za-z]{2,}", slug):
+            return slug.title()
+    q = urllib.parse.parse_qs(parsed.query)
+    for k in ("q", "keyword", "keywords", "query", "search"):
+        if q.get(k) and q[k][0].strip():
+            return urllib.parse.unquote_plus(q[k][0]).strip()
+    return ""
 
 
 def _greenhouse_ids(url: str):
@@ -1432,7 +1462,8 @@ def _scrub_internal_tokens(value):
 
 # ── Main entry point ────────────────────────────────────────────────────────
 
-def build_persona_response(text: str = "", url: str = "", source: str = "job_description") -> dict:
+def build_persona_response(text: str = "", url: str = "", source: str = "job_description",
+                           mode: str = "job_description") -> dict:
     """
     Main pipeline orchestrator.
     Args:
@@ -1464,12 +1495,25 @@ def build_persona_response(text: str = "", url: str = "", source: str = "job_des
         result["_pipeline"]["fallback"] = fallback
 
         # Input classification: a search/category results page is NOT a single JD.
+        # Instead of hard-failing, offer the user a choice (market map / pick a job /
+        # paste JD). If they already chose "market_map", synthesize a cluster brief.
         if _looks_like_search_page(url, jd_content):
-            raise SafetyError(
-                "That looks like a job-search results page, not a single job posting. "
-                "Open a specific job and paste that link, or paste the full job "
-                "description text instead."
+            cluster = _role_cluster_from_url(url)
+            if mode != "market_map":
+                mkt = _detect_market(jd_content, "")
+                if mkt == "Global":
+                    mkt = _market_from_url(url) or "Global"
+                raise SearchPageError(role_hint=cluster, market=mkt)
+            cluster = cluster or "this role category"
+            jd_content = (
+                f"GENERAL MARKET MAP REQUEST (no single job description provided). Produce a "
+                f"broad, realistic candidate-market map for '{cluster}' roles: the full spectrum "
+                f"of candidate pools for this category, each with a sourcing playbook and "
+                f"conversion guidance. Treat '{cluster}' as the role focus."
             )
+            fallback = False
+            inferred_title = cluster
+            result["_pipeline"]["mode"] = "market_map"
 
         # For a user-provided URL, only reject fetched content on SECURITY grounds
         # (prompt injection or junk/garbage). We deliberately do NOT apply the
