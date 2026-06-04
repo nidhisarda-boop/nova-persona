@@ -992,13 +992,21 @@ function PersonaCard({ persona, index, locked, onToggleLock }) {
         {/* Evidence & Confidence */}
         <ConfidencePanel evidence_confidence={evidence_confidence} />
 
-        {/* Screening Diagnostic */}
+        {/* Optional interview signal (de-emphasized, collapsible) */}
         {screening_question?.question && (
-          <div style={S.panel("#eff6ff", "#bfdbfe")}>
-            <div style={{ ...S.panelTitle, color: "#1d4ed8" }}>
-              Screening Diagnostic
-            </div>
-            <div style={{ fontSize: 13, fontWeight: 700, color: "#1e293b", marginBottom: 8, lineHeight: 1.4 }}>
+          <details style={{ ...S.panel("#f8fafc", "#e2e8f0"), padding: "10px 14px" }}>
+            <summary
+              style={{
+                ...S.panelTitle,
+                color: "#94a3b8",
+                cursor: "pointer",
+                listStyle: "revert",
+                margin: 0,
+              }}
+            >
+              Optional interview signal
+            </summary>
+            <div style={{ fontSize: 13, fontWeight: 700, color: "#1e293b", margin: "8px 0", lineHeight: 1.4 }}>
               "{screening_question.question}"
             </div>
             {screening_question.high_risk_answer && (
@@ -1028,7 +1036,7 @@ function PersonaCard({ persona, index, locked, onToggleLock }) {
                 💡 {screening_question.why_it_matters}
               </div>
             )}
-          </div>
+          </details>
         )}
 
         {/* Churn Risk */}
@@ -1073,6 +1081,47 @@ function PersonaCard({ persona, index, locked, onToggleLock }) {
                 )}
               </div>
             )}
+            {/* Boolean search string */}
+            {recruiter_action.sourcing_channel?.search_string && (
+              <div
+                style={{
+                  fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
+                  fontSize: 11.5,
+                  color: "#334155",
+                  background: "#f1f5f9",
+                  border: "1px solid #e2e8f0",
+                  borderRadius: 8,
+                  padding: "8px 10px",
+                  marginBottom: 8,
+                  lineHeight: 1.5,
+                  whiteSpace: "pre-wrap",
+                  wordBreak: "break-word",
+                }}
+              >
+                🔍 {recruiter_action.sourcing_channel.search_string}
+              </div>
+            )}
+            {/* Target companies */}
+            {recruiter_action.sourcing_channel?.target_companies?.length > 0 && (
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 8 }}>
+                {recruiter_action.sourcing_channel.target_companies.map((c, i) => (
+                  <span
+                    key={i}
+                    style={{
+                      fontSize: 11,
+                      fontWeight: 600,
+                      color: "#7c3aed",
+                      background: "#f3e8ff",
+                      border: "1px solid #e9d5ff",
+                      borderRadius: 999,
+                      padding: "3px 9px",
+                    }}
+                  >
+                    {c}
+                  </span>
+                ))}
+              </div>
+            )}
             {/* Conversion Hook */}
             {recruiter_action.conversion_hook && (
               <div style={S.hookBox}>
@@ -1084,6 +1133,30 @@ function PersonaCard({ persona, index, locked, onToggleLock }) {
                 {recruiter_action.conversion_hook.core_value_prop && (
                   <div style={S.hookProp}>
                     {recruiter_action.conversion_hook.core_value_prop}
+                  </div>
+                )}
+              </div>
+            )}
+            {/* Application drop-off risk + fix */}
+            {recruiter_action.application_dropoff_risk?.risk && (
+              <div
+                style={{
+                  background: "#fffbeb",
+                  border: "1px solid #fde68a",
+                  borderRadius: 8,
+                  padding: "8px 10px",
+                  marginBottom: 8,
+                  lineHeight: 1.5,
+                }}
+              >
+                <div style={{ fontSize: 12, color: "#92400e" }}>
+                  <strong>📉 Drop-off risk: </strong>
+                  {recruiter_action.application_dropoff_risk.risk}
+                </div>
+                {recruiter_action.application_dropoff_risk.fix && (
+                  <div style={{ fontSize: 12, color: "#166534", marginTop: 4 }}>
+                    <strong>✅ Fix: </strong>
+                    {recruiter_action.application_dropoff_risk.fix}
                   </div>
                 )}
               </div>
@@ -1211,11 +1284,14 @@ const DEFINITIONS = [
   {
     group: "Recruiter Fields",
     items: [
+      ["Sourcing Channel", "Where to actually find this segment — the specific platform and how to use it (e.g. LinkedIn Recruiter, Naukri/Instahyre for India)."],
+      ["Search String", "A copy-paste boolean search (role-title synonyms + industry terms + skills) you can drop straight into LinkedIn Recruiter or a job board to surface this pool."],
+      ["Target Companies", "5–8 named companies or talent pools to source this persona from — competitors and adjacent-industry leaders to poach from."],
+      ["Conversion Hook", "The persona-specific headline and pitch most likely to get this segment to apply — different for each pool."],
+      ["Drop-off Risk & Fix", "Why this segment abandons before applying or declines the offer, and the precise change to the JD, process, or messaging that removes it. This is the activation lever, more useful than an interview question."],
       ["Interview Red Flag", "What this candidate might say that signals a high risk of quitting within 30 days."],
       ["Churn Trigger", "The single operational change (shift, on-site rule, pay timing) most likely to make this segment disengage or ghost."],
-      ["Screening Diagnostic", "A recommended question tuned to this segment, plus the high-risk answer to listen for (the red flag), why that answer predicts poor fit, and what a strong answer reveals — so anyone can evaluate the response, not just a trained interviewer."],
-      ["Conversion Hook", "The exact headline and value proposition most likely to get this segment to apply."],
-      ["Sourcing Channel", "Where to actually find this segment — market-specific platforms (e.g. Naukri/Instahyre for India, LinkedIn/Indeed for the US)."],
+      ["Optional Interview Signal", "A secondary, collapsible aid: one recommended question plus the high-risk answer to listen for. Nice-to-have, not the core product."],
     ],
   },
 ];

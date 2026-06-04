@@ -511,9 +511,10 @@ def _extract_signals(text: str) -> dict:
 
     # Title: look for common patterns
     title_patterns = [
-        r"(?:job title|position|role)[:\s]+([A-Za-z][^\n,|]{3,60})",
+        r"^\s*Title:\s*([A-Za-z][^\n]{2,70})",                 # Jina/Greenhouse title line
+        r"(?:job title|position)\s*:\s*([A-Za-z][^\n,|]{3,60})",
+        r"\brole\s*:\s*([A-Za-z][^\n,|]{3,60})",               # requires a colon (not "Role Overview")
         r"^#+\s*([A-Za-z][^\n]{3,60})$",
-        r"^([A-Za-z][^\n]{3,60})\n",
     ]
     for pat in title_patterns:
         m = re.search(pat, text[:500], re.MULTILINE | re.IGNORECASE)
@@ -696,9 +697,29 @@ SELF-VALIDATION — Before returning output, check all of these. If any fail, re
 ✗ REJECT if sourcing channels are country-wrong (e.g. Indeed/Facebook Local for an India role)
 ✗ REJECT if any persona age range starts below the role's minimum eligibility age
 ✗ REJECT if any conversion_hook.headline contains a specific earnings dollar/currency amount not sourced directly from the JD
+✗ REJECT if Axis C = 1 while personas span multiple income tiers or mix single/dual-income households (that is bimodal → Axis C ≥ 2)
+✗ REJECT if Axis D = 1 while personas come from clearly different industries/entry-paths (→ Axis D ≥ 2)
+✗ REJECT if any persona's sourcing_channel lacks a real boolean search_string or has fewer than 5 target_companies
+✗ REJECT if any persona is missing application_dropoff_risk.risk and .fix
+✗ REJECT if two personas share the same conversion_hook.headline
 ✗ REJECT if all primary_motivations are variations of "flexibility and autonomy"
 ✗ REJECT if two or more personas share the same sourcing_channel.primary
 ✗ REJECT if gig role has no persona addressing vehicle access barrier or competing platform users
+
+ACTIVATION OUTPUT PRIORITY (this is the core product — spend your effort here):
+The buyer is a Talent Marketing / Employer Brand lead. They need: WHO to target, WHERE to find them, WHAT message converts them, and WHY they drop off. Make these fields excellent:
+- sourcing_channel.search_string: a REAL copy-paste boolean string (role-title synonyms AND industry terms AND skill phrases). Not "search LinkedIn".
+- sourcing_channel.target_companies: 5-8 named companies/talent pools to poach this exact persona from (competitors, adjacent-industry leaders).
+- conversion_hook: a DIFFERENT, persona-specific pitch per persona — speak to that pool's specific motivation.
+- application_dropoff_risk: why this segment ghosts or declines, and the precise fix. This is more valuable than any interview question.
+- job_ad_rewrite.recommended_headline: candidate-facing and specific to the role's true operating center (e.g. "Lead global campaign execution for an iconic beer portfolio", not "Lead Global Brand Strategy").
+The screening_question / diagnostic is SECONDARY — keep it to one strong question; do not let it compensate for weak sourcing or segmentation.
+
+AXIS SCORE ↔ PERSONA CONSISTENCY (score the axes to MATCH the pools you actually generate):
+- Axis C (HH Income): if your personas span more than one income tier, or mix single-income and dual-income households, or cover a household-income range wider than ~$40k, Axis C is at least 2 (bimodal); a full spectrum is 3. Do NOT score Axis C = 1 while generating personas with visibly different income structures.
+- Axis D (Background): if personas come from different industries or entry paths (e.g. CPG + tech/SaaS + agency), that is adjacency-friendly — Axis D is at least 2.
+- Axis A (Motivation): if personas have distinctly different primary_motivations, Axis A is at least 2.
+Re-check your 5-axis scores against the final persona set before returning; a senior role at a large global company is rarely a uniform 1-1-1 pool.
 
 CONDITIONAL FIELDS (avoid no-signal filler):
 - hours_per_week_expected, payment_preference (financials) and tech_savviness_score, hardware_devices (tech_profile) carry signal ONLY for gig_flexible / hourly_frontline / licensed_skilled frontline roles. For corporate_professional and executive_specialist presets these are constant noise — set them to null. Do NOT invent laptop/phone models or a "5/5" tech score for office roles.
@@ -878,12 +899,18 @@ def _build_prompt(jd_text: str, signals: dict, onet: dict, wages: dict, demos: s
       },
       "recruiter_action": {
         "sourcing_channel": {
-          "primary": "string — exact platform",
+          "primary": "string — exact platform AND how to use it (e.g. 'LinkedIn Recruiter')",
+          "search_string": "string — a copy-paste boolean search: role titles + industry terms + skills (e.g. (\"Brand Manager\" OR \"Campaign Manager\") AND (CPG OR FMCG OR beverage) AND (\"global campaign\" OR \"media planning\"))",
+          "target_companies": ["string — 5-8 specific companies/talent pools to source this persona from"],
           "organic_play": "string — non-paid tactic"
         },
         "conversion_hook": {
-          "headline": "string — exact ad headline",
-          "core_value_prop": "string"
+          "headline": "string — persona-specific ad headline (different for each persona)",
+          "core_value_prop": "string — the pitch that resonates with THIS pool specifically"
+        },
+        "application_dropoff_risk": {
+          "risk": "string — why THIS segment abandons before applying or declines the offer",
+          "fix": "string — the specific change to JD/process/messaging that removes that drop-off"
         },
         "funnel_friction_killer": "string — exact application process change"
       }
@@ -1233,7 +1260,8 @@ def build_persona_response(text: str = "", url: str = "", source: str = "job_des
     # Use the page/slug title whenever the in-text title regex came up empty
     # (e.g. Greenhouse pages where the body starts with legal boilerplate).
     if inferred_title:
-        signals["title"] = signals.get("title") or inferred_title
+        # The page/ATS title is more reliable than the in-text regex guess.
+        signals["title"] = inferred_title
     result["_pipeline"]["signals"] = signals
 
     # Hard guard: in fallback mode we rely entirely on the title, so never
