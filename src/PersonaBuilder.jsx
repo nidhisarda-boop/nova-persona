@@ -808,6 +808,95 @@ function ConfidencePanel({ evidence_confidence }) {
   );
 }
 
+function MiniBtn({ onClick, href, children, primary }) {
+  const style = {
+    fontSize: 11,
+    fontWeight: 600,
+    padding: "4px 9px",
+    borderRadius: 6,
+    border: "1px solid " + (primary ? "#7c3aed" : "#cbd5e1"),
+    background: primary ? "#7c3aed" : "#fff",
+    color: primary ? "#fff" : "#475569",
+    cursor: "pointer",
+    textDecoration: "none",
+    display: "inline-flex",
+    alignItems: "center",
+    gap: 4,
+  };
+  return href ? (
+    <a href={href} target="_blank" rel="noreferrer" style={style}>{children}</a>
+  ) : (
+    <button onClick={onClick} style={style}>{children}</button>
+  );
+}
+
+function SearchStringBlock({ query }) {
+  const [copied, setCopied] = useState(false);
+  const copy = () => {
+    try { navigator.clipboard.writeText(query); setCopied(true); setTimeout(() => setCopied(false), 1500); } catch {}
+  };
+  const enc = encodeURIComponent(query);
+  const links = [
+    ["LinkedIn Recruiter", `https://www.linkedin.com/talent/search?keywords=${enc}`],
+    ["LinkedIn", `https://www.linkedin.com/search/results/people/?keywords=${enc}`],
+    ["Indeed", `https://www.indeed.com/jobs?q=${enc}`],
+    ["Google X-ray", `https://www.google.com/search?q=${encodeURIComponent("site:linkedin.com/in " + query)}`],
+  ];
+  return (
+    <div style={{ marginBottom: 8 }}>
+      <div
+        style={{
+          fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
+          fontSize: 11.5, color: "#334155", background: "#f1f5f9",
+          border: "1px solid #e2e8f0", borderRadius: 8, padding: "8px 10px",
+          lineHeight: 1.5, whiteSpace: "pre-wrap", wordBreak: "break-word",
+        }}
+      >
+        🔍 {query}
+      </div>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 6 }}>
+        <MiniBtn onClick={copy} primary>{copied ? "✓ Copied" : "Copy string"}</MiniBtn>
+        {links.map(([label, href]) => (
+          <MiniBtn key={label} href={href}>{label} ↗</MiniBtn>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function buildSourcingPack(persona) {
+  const m = persona.metadata || {};
+  const ra = persona.recruiter_action || {};
+  const sc = ra.sourcing_channel || {};
+  const hook = ra.conversion_hook || {};
+  const drop = ra.application_dropoff_risk || {};
+  const lines = [
+    `SOURCING PACK — ${m.name || "Persona"}${m.archetype ? ` (${m.archetype})` : ""}`,
+    m.segment_size_percentage != null ? `Segment: ${m.segment_size_percentage}% of pool` : "",
+    "",
+    sc.primary ? `Channel: ${sc.primary}` : "",
+    sc.search_string ? `Boolean: ${sc.search_string}` : "",
+    (sc.target_companies && sc.target_companies.length) ? `Target companies: ${sc.target_companies.join(", ")}` : "",
+    sc.organic_play ? `Organic play: ${sc.organic_play}` : "",
+    "",
+    hook.headline ? `Conversion headline: ${hook.headline}` : "",
+    hook.core_value_prop ? `Value prop: ${hook.core_value_prop}` : "",
+    ra.outreach_script ? `Outreach: ${ra.outreach_script}` : "",
+    "",
+    drop.risk ? `Drop-off risk: ${drop.risk}` : "",
+    drop.fix ? `Fix: ${drop.fix}` : "",
+  ];
+  return lines.filter((l) => l !== undefined).join("\n").replace(/\n{3,}/g, "\n\n").trim();
+}
+
+function ExportPackButton({ persona }) {
+  const [done, setDone] = useState(false);
+  const copy = () => {
+    try { navigator.clipboard.writeText(buildSourcingPack(persona)); setDone(true); setTimeout(() => setDone(false), 1500); } catch {}
+  };
+  return <MiniBtn onClick={copy}>{done ? "✓ Copied pack" : "📋 Export sourcing pack"}</MiniBtn>;
+}
+
 function PersonaCard({ persona, index, locked, onToggleLock }) {
   const color = ACCENT_COLORS[index % ACCENT_COLORS.length];
   const { metadata, demographics, financials, drivers_and_friction, tech_profile, evidence_confidence, screening_question, recruiter_action } = persona;
@@ -1074,8 +1163,9 @@ function PersonaCard({ persona, index, locked, onToggleLock }) {
         {/* Recruiter Action */}
         {recruiter_action && (
           <div style={S.panel("#faf5ff", "#d8b4fe")}>
-            <div style={{ ...S.panelTitle, color: "#7c3aed" }}>
-              Recruiter Action
+            <div style={{ ...S.panelTitle, color: "#7c3aed", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <span>Recruiter Action</span>
+              <ExportPackButton persona={persona} />
             </div>
             {/* Sourcing */}
             {(recruiter_action.sourcing_channel?.primary || recruiter_action.sourcing_channel?.organic_play) && (
@@ -1092,25 +1182,9 @@ function PersonaCard({ persona, index, locked, onToggleLock }) {
                 )}
               </div>
             )}
-            {/* Boolean search string */}
+            {/* Boolean search string — copy + deep-link launch */}
             {recruiter_action.sourcing_channel?.search_string && (
-              <div
-                style={{
-                  fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
-                  fontSize: 11.5,
-                  color: "#334155",
-                  background: "#f1f5f9",
-                  border: "1px solid #e2e8f0",
-                  borderRadius: 8,
-                  padding: "8px 10px",
-                  marginBottom: 8,
-                  lineHeight: 1.5,
-                  whiteSpace: "pre-wrap",
-                  wordBreak: "break-word",
-                }}
-              >
-                🔍 {recruiter_action.sourcing_channel.search_string}
-              </div>
+              <SearchStringBlock query={recruiter_action.sourcing_channel.search_string} />
             )}
             {/* Target companies */}
             {recruiter_action.sourcing_channel?.target_companies?.length > 0 && (
@@ -1356,6 +1430,49 @@ function DefinitionsPanel() {
   );
 }
 
+function SearchPageChooser({ data, onMarketMap, onPaste }) {
+  const act = (id) => {
+    if (id === "market_map") onMarketMap();
+    else if (id === "paste") onPaste();
+  };
+  const mkt = data.market && data.market !== "Global" ? ` (${data.market})` : "";
+  return (
+    <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 16, padding: 24, maxWidth: 760, margin: "0 auto" }}>
+      <div style={{ fontSize: 18, fontWeight: 800, color: "#1e293b", marginBottom: 6 }}>
+        This looks like a job-search results page
+      </div>
+      <p style={{ color: "#64748b", fontSize: 14, marginBottom: 18, lineHeight: 1.5 }}>
+        {data.message}
+        {data.role_hint ? ` Detected category: “${data.role_hint}”${mkt}.` : ""} Choose how to proceed:
+      </p>
+      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+        {(data.options || []).map((opt) => (
+          <button
+            key={opt.id}
+            onClick={() => act(opt.id)}
+            disabled={opt.id === "pick_job"}
+            style={{
+              textAlign: "left", padding: "14px 16px", borderRadius: 10,
+              border: "1px solid " + (opt.id === "market_map" ? "#6366f1" : "#e2e8f0"),
+              background: opt.id === "market_map" ? "#eef2ff" : "#fff",
+              color: "#1e293b", fontSize: 14, fontWeight: 600,
+              cursor: opt.id === "pick_job" ? "default" : "pointer",
+            }}
+          >
+            {opt.id === "market_map" ? "🗺️ " : opt.id === "paste" ? "📋 " : "🔗 "}
+            {opt.label}
+            {opt.id === "pick_job" && (
+              <div style={{ fontWeight: 400, color: "#94a3b8", fontSize: 12, marginTop: 3 }}>
+                Open the results page, click into a specific job, and paste its URL above.
+              </div>
+            )}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export default function PersonaBuilder() {
   const [url, setUrl] = useState("");
   const [pasteMode, setPasteMode] = useState(false);
@@ -1379,7 +1496,8 @@ export default function PersonaBuilder() {
     return id;
   }, []);
 
-  const handleGenerate = useCallback(async () => {
+  const handleGenerate = useCallback(async (modeArg) => {
+    const mode = typeof modeArg === "string" ? modeArg : null;
     const hasUrl = url.trim().length > 0;
     const hasText = pasteText.trim().length > 0;
 
@@ -1396,6 +1514,7 @@ export default function PersonaBuilder() {
 
     try {
       const body = pasteMode && hasText ? { text: pasteText.trim() } : { url: url.trim() };
+      if (mode) body.mode = mode;
       const res = await fetch("/api/analyze-jd", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -1581,7 +1700,15 @@ export default function PersonaBuilder() {
         {loading && <LoadingPanel step={loadingStep} />}
 
         {/* Results */}
-        {result && !loading && (
+        {result && !loading && result.page_type === "search_results" && (
+          <SearchPageChooser
+            data={result}
+            onMarketMap={() => handleGenerate("market_map")}
+            onPaste={() => { setPasteMode(true); setResult(null); }}
+          />
+        )}
+
+        {result && !loading && result.page_type !== "search_results" && (
           <>
             <Banner data={result} />
 
