@@ -817,10 +817,17 @@ def _call_llm(prompt: str) -> str:
     def _is_rate_limit(e):
         return isinstance(e, requests.exceptions.HTTPError) and getattr(e.response, "status_code", None) == 429
 
-    def _status_of(e):
+    def _reason(name, e):
         code = getattr(getattr(e, "response", None), "status_code", None)
-        return f"{n}:{code}" if code else f"{n}:{type(e).__name__}"
-    _dbg = " [" + ", ".join(f"{name}:{getattr(getattr(e,'response',None),'status_code',None) or type(e).__name__}" for name, e in errors) + "]"
+        detail = ""
+        try:
+            err = e.response.json().get("error", {})
+            detail = err.get("status") or err.get("message") or ""
+        except Exception:
+            detail = type(e).__name__
+        detail = re.sub(r"AIza[\w\-]+", "", str(detail))[:120]
+        return f"{name}:{code}:{detail}"
+    _dbg = " [" + " | ".join(_reason(name, e) for name, e in errors) + "]"
     if any(_is_rate_limit(e) for _, e in errors):
         raise LLMUnavailableError(
             "The AI model is receiving too many requests right now. "
