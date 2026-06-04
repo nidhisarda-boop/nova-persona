@@ -19,6 +19,11 @@ class OutputValidationError(ValueError):
     pass
 
 
+# When false (default/production), internal pipeline fields are stripped from the
+# response so they never reach the browser. Set DEBUG_PIPELINE=1 to expose them.
+DEBUG_PIPELINE = os.environ.get("DEBUG_PIPELINE", "").lower() in ("1", "true", "yes", "on")
+
+
 # Private/reserved IP ranges that must never be fetched (SSRF protection)
 _PRIVATE_RANGES = [
     ipaddress.ip_network("10.0.0.0/8"),
@@ -895,8 +900,12 @@ def build_persona_response(text: str = "", url: str = "", source: str = "job_des
     data = validate_output(data)      # schema + safety check before it leaves the server
     data = _normalize_segments(data)
 
-    # Metadata
-    data["_provider"] = "gemini" if GEMINI_KEY else "groq"
-    data["_pipeline_ms"] = round((time.time() - start) * 1000)
+    # Debug internals — only exposed when DEBUG_PIPELINE is enabled.
+    if DEBUG_PIPELINE:
+        data["_provider"] = "gemini" if GEMINI_KEY else "groq"
+        data["_pipeline_ms"] = round((time.time() - start) * 1000)
+        data["_pipeline"] = result["_pipeline"]
+        return data
 
-    return data
+    # Production: strip every internal/debug field so nothing leaks to the browser.
+    return {k: v for k, v in data.items() if not k.startswith("_")}
