@@ -555,14 +555,18 @@ def _extract_signals(text: str) -> dict:
 
     # Location — prefer an explicitly labeled line, else first "City, ST/Country"
     loc_label = re.search(
-        r"(?:work location|location|based in|office)\s*[:\-]\s*([A-Z][A-Za-z .'/]+(?:,\s*[A-Za-z]{2,})?)",
+        r"(?:work location|location|based in|office)\s*[:\-]\s*"
+        r"([A-Z][A-Za-z]+(?:[ /][A-Z][A-Za-z]+){0,4}(?:,\s*[A-Z][A-Za-z]+(?:\s[A-Z][A-Za-z]+)?)?)",
         text, re.IGNORECASE,
     )
     if loc_label:
-        signals["location"] = loc_label.group(1).strip().rstrip(".").strip()
+        loc = loc_label.group(1).strip().rstrip(".").strip()
+        loc = re.sub(r"\s+(area|region|metro\w*|and|with|the)\b.*$", "", loc, flags=re.IGNORECASE).strip()
+        signals["location"] = loc
     else:
         loc_m = re.search(
-            r"\b([A-Z][a-z]+(?:\s[A-Z][a-z]+)*,\s*(?:[A-Z]{2}|[A-Za-z]+))\b", text[:1500]
+            r"\b([A-Z][a-z]+(?:[ /][A-Z][a-z]+){0,3},\s*(?:[A-Z]{2}\b|[A-Z][a-z]+(?:\s[A-Z][a-z]+)?))",
+            text[:1500],
         )
         if loc_m:
             signals["location"] = loc_m.group(1)
@@ -784,7 +788,7 @@ PERSONA QUALIFICATION (pools must actually qualify for the role):
 - EXPERIENCE IS NOT AGE: a years-of-experience requirement constrains seniority, NOT age — someone can have 3+ (even 8+) years by their late 20s/30s. Vary age ranges realistically and WIDELY across personas (e.g. 26–34, 32–45, 45–58). Do NOT cluster every persona in a near-retirement (50+) band. If all personas end up 50+, you have made an error — fix it.
 - NO OVERQUALIFIED OR EXOTIC POOLS: do not invent segments who would not realistically apply for this role — e.g. a PhD academic, a hobbyist/DIY homeowner, or a far-senior executive for a hands-on field/technician/hourly job. Every persona must be someone who would plausibly take THIS role.
 - INDUSTRY-NATIVE POOL: if the JD explicitly requires experience in a specific industry or function (e.g. staffing / recruitment / detachering, fintech, healthcare), at least one persona MUST come natively from that industry — that is usually the single best-fit pool, so prioritize it over generic adjacent pools.
-- COMPETITOR-TALENT FIRST (skilled trades / experienced roles): order the pools by fit. (1) people already doing this exact job, including at named competitors, should be the LARGEST persona; (2) adjacent field-service / route-based trades next (e.g. HVAC, appliance/pool service, facilities, lawn/landscaping applicators); (3) then a bridge. Do NOT lead with niche or exotic pools.
+- COMPETITOR-TALENT FIRST (skilled trades / experienced roles): order the pools by fit. (1) people already doing this exact job, including at named competitors, are the LARGEST persona at roughly 45–55% of the pool; (2) adjacent field-service / route-based trades next, smaller (e.g. HVAC, appliance/pool service, facilities, lawn/landscaping applicators); (3) then a small bridge (~15–20%). Do NOT lead with niche or exotic pools, and do not let an adjacent pool exceed the direct-experience pool.
 
 OUTPUT POLISH & HONESTY (V2.1 — enterprise quality):
 - ONE PERSONA PER DISTINCT POOL: if the JD describes distinct functional areas (e.g. campaign execution, creative studio / content operations, media planning, agency management), give each its own persona rather than merging them. A creative-studio/content-ops pool is distinct from a media-planning pool and from an agency-campaign-lead pool — if the JD covers all of them, prefer the upper end of the persona band so each is represented.
@@ -792,6 +796,9 @@ OUTPUT POLISH & HONESTY (V2.1 — enterprise quality):
 - NO UNSUPPORTED BRAND NAMES: do not name specific brands/products (e.g. Budweiser) unless they appear in the JD. Otherwise say "AB InBev's portfolio" or "the brand."
 - PLAIN-ENGLISH EVIDENCE: evidence_basis must use human-readable source descriptions ("the job posting", "US labor-market norms"). NEVER emit internal variable names (MARKET_GROUNDING, STRUCTURED_JD, ONET_GROUNDING) — those are not sources.
 - PROOFREAD: put a space between a number and its unit ("1 billion", not "1billion"). Never emit placeholders like "(truncated…)". When quoting a JD line to remove, quote it in full or paraphrase it — never a fragment.
+- COMPENSATION LABELING: if the JD discloses NO pay/salary structure, do NOT assume "salaried" and do NOT invent one. Set local_context.role_type to the actual employment type stated (e.g. "full-time"; "contract"/"hourly" only if stated) and local_context.posted_compensation to null. Any household-income or target-pay figure in that case is INFERRED — say so in household_income_note and keep evidence confidence modest.
+- JD-NATIVE CONVERSION HOOKS: pull the JD's strongest concrete selling points into conversion_hook and job_ad_rewrite where the JD states them — e.g. "dispatch from home", "company vehicle", "year-round work", "401(k) match", named certifications. A direct-fit persona's hook should lead with the JD's best perks, not generic phrasing.
+- NO UNSUPPORTED OPERATIONAL CLAIMS: never invent specific operational promises absent from the JD — no "onboarding begins within 48 hours", "instant enrollment", guaranteed timelines, or exact pay amounts not in the JD. CTAs stay benefit-led, not fabricated-specific.
 
 Return ONLY valid JSON. No markdown. No explanation."""
 
