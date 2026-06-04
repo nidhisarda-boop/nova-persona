@@ -872,13 +872,21 @@ def build_persona_response(text: str = "", url: str = "", source: str = "job_des
             try:
                 validate_text(jd_content)
             except SafetyError:
-                # Page loaded but isn't a job description — trigger fallback
-                fallback = True
-                jd_content = inferred_title or ""
+                # Page loaded fine but isn't a job description (e.g. a marketing
+                # or landing page). Don't crash — return a clear, user-facing 400.
                 result["_pipeline"]["fallback_reason"] = "fetched_page_not_job_related"
+                raise SafetyError(
+                    "We couldn't find a job description at that URL — it looks like a "
+                    "marketing or landing page rather than a job posting. Please switch "
+                    "to paste mode and paste the job description text directly."
+                )
 
     if not jd_content and not inferred_title:
-        raise ValueError("No job content provided and URL fetch returned empty content.")
+        # URL fetch returned nothing usable and no title could be inferred.
+        raise SafetyError(
+            "We couldn't read a job description from that URL. Please paste the "
+            "job description text directly instead."
+        )
 
     # ── Sanitize before injecting into LLM prompt ──────────────────────────
     jd_content = sanitize_for_prompt(jd_content)
