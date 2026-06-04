@@ -1218,8 +1218,18 @@ export default function PersonaBuilder() {
         body: JSON.stringify(body),
       });
       if (!res.ok) {
-        const errText = await res.text().catch(() => "Unknown error");
-        throw new Error(`API error ${res.status}: ${errText}`);
+        // Prefer the server's user-facing message from the JSON body
+        let msg = "Something went wrong. Please try again.";
+        try {
+          const errData = await res.json();
+          if (errData && errData.error) msg = errData.error;
+        } catch {
+          /* non-JSON response — keep the generic message */
+        }
+        if (res.status === 429) {
+          msg = "You're sending requests too quickly. Please wait a minute and try again.";
+        }
+        throw new Error(msg);
       }
       const data = await res.json();
       // Normalize segment percentages

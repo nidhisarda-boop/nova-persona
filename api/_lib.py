@@ -104,12 +104,21 @@ def validate_url(url: str) -> str:
                 "Please paste a direct link to a publicly accessible job page."
             )
 
-    # SSRF: resolve hostname and check against private ranges
+    # SSRF: resolve ALL addresses (IPv4 + IPv6) and reject if any is internal
     try:
-        ip_str = socket.gethostbyname(hostname)
-        ip_obj = ipaddress.ip_address(ip_str)
-        for private_range in _PRIVATE_RANGES:
-            if ip_obj in private_range:
+        infos = socket.getaddrinfo(hostname, None)
+        resolved = {info[4][0] for info in infos}
+        for ip_str in resolved:
+            ip_obj = ipaddress.ip_address(ip_str)
+            # IPv4-mapped IPv6 (e.g. ::ffff:127.0.0.1) — unwrap to the IPv4 form
+            if getattr(ip_obj, "ipv4_mapped", None):
+                ip_obj = ip_obj.ipv4_mapped
+            is_internal = (
+                ip_obj.is_private or ip_obj.is_loopback or ip_obj.is_link_local
+                or ip_obj.is_reserved or ip_obj.is_multicast or ip_obj.is_unspecified
+                or any(ip_obj in r for r in _PRIVATE_RANGES)
+            )
+            if is_internal:
                 raise SafetyError(
                     "That URL resolves to a private or internal address. "
                     "Please paste a link to a public job posting."
@@ -700,6 +709,7 @@ def _call_groq(prompt: str) -> str:
             "messages": [{"role": "user", "content": prompt}],
             "temperature": 0.7,
             "max_tokens": 6000,
+            "response_format": {"type": "json_object"},
         },
         timeout=60,
     )

@@ -13,6 +13,9 @@ RATE_LIMIT_WINDOW = int(os.environ.get("RATE_LIMIT_WINDOW", "60"))  # seconds
 # Max accepted request body. Rejected before the body is read into memory.
 MAX_BODY_BYTES = int(os.environ.get("MAX_BODY_BYTES", "100000"))    # 100 KB
 
+# Comma-separated list of origins allowed to call this endpoint cross-origin.
+ALLOWED_ORIGINS = os.environ.get("ALLOWED_ORIGINS", "")
+
 # Vercel KV / Upstash Redis REST (set automatically by the Vercel KV integration)
 _KV_URL   = os.environ.get("KV_REST_API_URL")   or os.environ.get("UPSTASH_REDIS_REST_URL")
 _KV_TOKEN = os.environ.get("KV_REST_API_TOKEN") or os.environ.get("UPSTASH_REDIS_REST_TOKEN")
@@ -107,10 +110,26 @@ class handler(BaseHTTPRequestHandler):
             # LLM produced malformed/unsafe output — 502, ask the user to retry
             self._json({"error": str(e), "error_type": "output_validation"}, 502)
         except Exception as e:
-            self._json({"error": str(e)}, 500)
+            # Log the real error to the server (visible in Vercel logs only),
+            # return a generic message so internal details never reach the client.
+            import traceback
+            traceback.print_exc()
+            self._json({
+                "error": "Something went wrong while generating personas. Please try again.",
+                "error_type": "server_error"
+            }, 500)
 
     def _cors(self):
-        self.send_header('Access-Control-Allow-Origin', '*')
+        # Allowlist of origins permitted to call this endpoint cross-origin.
+        # Comma-separated env var, e.g. "https://nova-persona.vercel.app,https://app.joveo.com".
+        # When unset, no cross-origin header is sent — the app itself is served
+        # same-origin so it keeps working, while other sites are blocked from
+        # calling the endpoint and burning LLM credits.
+        origin = self.headers.get('Origin', '')
+        allowed = [o.strip() for o in ALLOWED_ORIGINS.split(',') if o.strip()]
+        if allowed and origin in allowed:
+            self.send_header('Access-Control-Allow-Origin', origin)
+            self.send_header('Vary', 'Origin')
         self.send_header('Access-Control-Allow-Methods', 'POST, OPTIONS')
         self.send_header('Access-Control-Allow-Headers', 'Content-Type')
 
