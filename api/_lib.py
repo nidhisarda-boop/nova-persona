@@ -665,12 +665,20 @@ CORPORATE / SENIOR BRIDGE (for corporate_professional and executive_specialist p
 STEP 4 — GENERATE PERSONAS WITH MAXIMUM VARIANCE
 Maximize variance across personas on the highest-scoring axes. Personas that are minor demographic variations of each other are INVALID. Each must represent a genuinely distinct segment with different motivations, financial context, and life stage.
 
-Pew HH Income Tiers (calibrate to local COL):
+Pew HH Income Tiers — US roles (calibrate to local COL):
 - Lower: <$35k — paycheck to paycheck, every dollar critical
 - Lower-middle: $35k–$65k — stretched, gig income often essential not optional
 - Middle: $65k–$100k — stable, gig work supplemental or chosen flexibility
 - Upper-middle: $100k–$175k — comfortable, gig work genuinely optional
 - Upper: $175k+ — financially secure, exploratory or bridge situation
+
+EU / Eurozone HH Income Tiers (use when DETECTED_MARKET is EU; Western-EU/Netherlands calibration):
+- Lower: <€30k/yr
+- Lower-middle: €30k–€50k
+- Middle: €50k–€75k
+- Upper-middle: €75k–€120k
+- Upper: €120k+/yr
+Note: a single earner taking home €5k–€8k/month (~€60k–€96k/yr) is Middle to Upper-middle in this scale, NOT "Lower-middle". Calibrate the tier to the actual figure.
 
 GIG/CONTRACTOR ROLE SPECIAL RULES (apply when preset = gig_flexible or hourly_frontline):
 1. MINIMUM AGE: Do NOT generate personas below the minimum eligible age for the role. For rideshare/delivery platforms: minimum is typically 21 (Lyft, Uber) or 18 in select markets. Never assume 18 unless confirmed by JD or platform requirements page. Use "21–25 (verify local requirements)" not "18–25".
@@ -765,6 +773,22 @@ _MARKET_SIGNALS = {
         r"\b(?:london|manchester|birmingham|edinburgh|glasgow|leeds|bristol)\b",
         r"£", r"\bGBP\b", r"\bper annum\b",
     ],
+    "EU": [
+        r"€", r"\bEUR\b", r"\bZZP\b", r"\bjaar\b", r"\bper maand\b",
+        r"\b(?:netherlands|nederland|germany|deutschland|france|spain|espa|italy|"
+        r"belgium|ireland|austria|portugal|sweden|denmark|finland|poland)\b",
+        r"\b(?:amsterdam|rotterdam|the hague|den haag|utrecht|eindhoven|berlin|munich|"
+        r"frankfurt|paris|madrid|barcelona|milan|rome|brussels|dublin|lisbon)\b",
+        r"\b(?:detacher|uitzend|personeelbemiddeling|werkervaring)\w*",
+    ],
+    "Canada": [
+        r"\bcanada\b", r"\bcanadian\b", r"\bCAD\b", r"\bC\$",
+        r"\b(?:toronto|vancouver|montreal|calgary|ottawa|edmonton|mississauga)\b",
+    ],
+    "Australia": [
+        r"\baustralia\b", r"\baustralian\b", r"\bAUD\b", r"\bA\$", r"\bsuperannuation\b",
+        r"\b(?:sydney|melbourne|brisbane|perth|canberra|adelaide)\b",
+    ],
     "US": [
         r"\bunited states\b", r"\bu\.?s\.?a?\.?\b", r"\b401\(?k\)?\b", r"\bUSD\b",
         r"\b(?:new york|san francisco|seattle|austin|boston|chicago|los angeles)\b",
@@ -772,11 +796,15 @@ _MARKET_SIGNALS = {
     ],
 }
 
-_CURRENCY = {"India": "INR (₹)", "US": "USD ($)", "UK": "GBP (£)", "Global": "the role's local currency"}
+_CURRENCY = {
+    "India": "INR (₹)", "US": "USD ($)", "UK": "GBP (£)",
+    "EU": "EUR (€)", "Canada": "CAD (C$)", "Australia": "AUD (A$)",
+    "Global": "the role's local currency",
+}
 
 
 def _detect_market(text: str, location: str = "") -> str:
-    """Best-effort detection of the role's country market: India|US|UK|Global."""
+    """Best-effort detection of the role's country market."""
     blob = f"{location}\n{text[:4000]}"
     scores = {
         market: sum(1 for p in pats if re.search(p, blob, re.IGNORECASE))
@@ -785,8 +813,9 @@ def _detect_market(text: str, location: str = "") -> str:
     best = max(scores.values())
     if best == 0:
         return "Global"
-    # Deterministic priority on ties: India, then UK, then US
-    for market in ("India", "UK", "US"):
+    # Deterministic priority on ties: more-specific currencies/regions before US
+    # (US uses $, which is ambiguous with CAD/AUD, so it goes last).
+    for market in ("India", "UK", "EU", "Canada", "Australia", "US"):
         if scores[market] == best:
             return market
     return "Global"
