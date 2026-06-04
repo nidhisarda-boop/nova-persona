@@ -293,6 +293,32 @@ def _extract_jina_title(content: str) -> str:
     return title if re.search(r"[A-Za-z]{2,}", title) else ""
 
 
+_SEARCH_URL_PATTERNS = [
+    r"ziprecruiter\.com/Jobs/",          # ZipRecruiter category/search pages
+    r"indeed\.[^/]+/jobs\?",             # Indeed search
+    r"linkedin\.com/jobs/search",
+    r"/jobs/search\b", r"/job-search\b", r"/jobs/browse\b", r"/browse-jobs\b",
+    r"/jobs/?$", r"/search\b",
+    r"[?&](q|k|keyword|keywords|search|query)=",
+]
+
+
+def _looks_like_search_page(url: str, content: str) -> bool:
+    """Detect a job-search / category results page (many jobs) vs a single posting."""
+    u = url or ""
+    for pat in _SEARCH_URL_PATTERNS:
+        if re.search(pat, u, re.IGNORECASE):
+            return True
+    # Content signal: a listing page shows many distinct pay figures + many "apply"s.
+    if content:
+        pays = len(re.findall(r"[$£€₹]\s?\d", content))
+        applies = len(re.findall(r"\bapply\b", content, re.IGNORECASE))
+        titles = len(re.findall(r"\b(per hour|/hr|an hour)\b", content, re.IGNORECASE))
+        if pays >= 6 and (applies >= 5 or titles >= 4):
+            return True
+    return False
+
+
 def _greenhouse_ids(url: str):
     """Pull (board_token, job_id) from a Greenhouse URL, else (None, None)."""
     m = re.search(r"greenhouse\.io/(?:embed/job_app\?for=)?([\w-]+)/jobs/(\d+)", url)
@@ -1300,6 +1326,48 @@ def validate_output(data: dict) -> dict:
     return data
 
 
+def _target_persona_count(preset: str, score) -> int:
+    """Preset-aware deterministic persona count from the diversity score.
+    Frontline/gig roles run wider (5-6); corporate/exec run tighter (3-4/3)."""
+    try:
+        score = int(score)
+    except (TypeError, ValueError):
+        score = 8
+    p = (preset or "").lower()
+    if "executive" in p:
+        return 3
+    if "gig" in p or "hourly" in p or "frontline" in p:
+        return 6 if score >= 10 else 5
+    if "licensed" in p:
+        return 3 if score <= 7 else (4 if score <= 11 else 5)
+    # corporate_professional and default
+    return 3 if score <= 7 else 4
+
+
+def _enforce_persona_count(data: dict) -> dict:
+    """Deterministically cap the number of personas to the preset+score target.
+    Trims surplus personas (smallest segments first, keeping any bridge) and
+    re-normalizes the segment percentages. Never fabricates personas."""
+    ds = data.get("diversity_scoring") or {}
+    personas = data.get("personas")
+    if not isinstance(personas, list) or not personas:
+        return data
+    target = _target_persona_count(ds.get("preset_used", ""), ds.get("total_score", 8))
+    if len(personas) > target:
+        def _seg(p):
+            return (p.get("metadata") or {}).get("segment_size_percentage", 0) or 0
+        def _is_bridge(p):
+            return bool((p.get("metadata") or {}).get("is_bridge_persona"))
+        # Keep bridge personas + the largest segments up to target.
+        ordered = sorted(personas, key=lambda p: (_is_bridge(p), _seg(p)), reverse=True)
+        personas = ordered[:target]
+        data["personas"] = personas
+        data = _normalize_segments(data)
+    if isinstance(ds, dict):
+        ds["target_persona_count"] = len(personas)
+    return data
+
+
 _INTERNAL_TOKENS = re.compile(
     r"(MARKET[_ ]?GROUNDING(?:[._ ]?demographic[_ ]?signals)?"
     r"|STRUCTURED[_ ]?JD|ONET[_ ]?GROUNDING)",
@@ -1353,6 +1421,14 @@ def build_persona_response(text: str = "", url: str = "", source: str = "job_des
         inferred_title = fetch["inferred_title"]
         result["_pipeline"]["jina_chars"] = len(jd_content)
         result["_pipeline"]["fallback"] = fallback
+
+        # Input classification: a search/category results page is NOT a single JD.
+        if _looks_like_search_page(url, jd_content):
+            raise SafetyError(
+                "That looks like a job-search results page, not a single job posting. "
+                "Open a specific job and paste that link, or paste the full job "
+                "description text instead."
+            )
 
         # For a user-provided URL, only reject fetched content on SECURITY grounds
         # (prompt injection or junk/garbage). We deliberately do NOT apply the
@@ -1421,6 +1497,7 @@ def build_persona_response(text: str = "", url: str = "", source: str = "job_des
     data = _parse_json(raw)
     data = validate_output(data)      # schema + safety check before it leaves the server
     data = _normalize_segments(data)
+    data = _enforce_persona_count(data)   # deterministic, preset-aware count cap
     data = _scrub_internal_tokens(data)   # strip any leaked internal variable names
 
     # Guarantee the posted salary + location show even if the model omitted them.
