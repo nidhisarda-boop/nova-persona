@@ -867,25 +867,23 @@ def build_persona_response(text: str = "", url: str = "", source: str = "job_des
         result["_pipeline"]["jina_chars"] = len(jd_content)
         result["_pipeline"]["fallback"] = fallback
 
-        # Validate fetched content too (could be login wall, captcha page, or injected page)
-        if jd_content and not fallback:
-            try:
-                validate_text(jd_content)
-            except SafetyError:
-                # Page loaded fine but isn't a job description (e.g. a marketing
-                # or landing page). Don't crash — return a clear, user-facing 400.
-                result["_pipeline"]["fallback_reason"] = "fetched_page_not_job_related"
-                raise SafetyError(
-                    "We couldn't find a job description at that URL — it looks like a "
-                    "marketing or landing page rather than a job posting. Please switch "
-                    "to paste mode and paste the job description text directly."
-                )
+        # For a user-provided URL, only reject fetched content on SECURITY grounds
+        # (prompt injection or junk/garbage). We deliberately do NOT apply the
+        # stricter "looks like a job description" gate here — the user explicitly
+        # asked us to analyze this page, and the content is sanitized before it
+        # ever reaches the LLM. If the content is unsafe, fall back to the title
+        # inferred from the URL slug instead of failing.
+        if jd_content and not fallback and (_check_injection(jd_content) or _is_repetitive_garbage(jd_content)):
+            fallback = True
+            inferred_title = inferred_title or _extract_title_from_url(url)
+            jd_content = inferred_title
+            result["_pipeline"]["fallback_reason"] = "fetched_page_unsafe"
 
     if not jd_content and not inferred_title:
-        # URL fetch returned nothing usable and no title could be inferred.
+        # Nothing usable came back from the URL and no title could be inferred.
         raise SafetyError(
-            "We couldn't read a job description from that URL. Please paste the "
-            "job description text directly instead."
+            "We couldn't read anything from that URL. Please paste the job "
+            "description text directly instead."
         )
 
     # ── Sanitize before injecting into LLM prompt ──────────────────────────
