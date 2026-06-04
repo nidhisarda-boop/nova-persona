@@ -545,8 +545,55 @@ SELF-VALIDATION — Before returning output, check all of these. If any fail, re
 Return ONLY valid JSON. No markdown. No explanation."""
 
 
-def _build_prompt(jd_text: str, signals: dict, onet: dict, wages: dict, demos: str, fallback: bool) -> str:
+_MARKET_SIGNALS = {
+    "India": [
+        r"\bindia\b", r"\bindian\b",
+        r"\b(?:bangalore|bengaluru|mumbai|delhi|gurgaon|gurugram|hyderabad|pune|"
+        r"chennai|kolkata|noida|ahmedabad|jaipur|kochi|chandigarh|indore)\b",
+        r"₹", r"\bINR\b", r"\b(?:lakh|lakhs|lpa|crore)\b", r"\brs\.?\s?\d",
+    ],
+    "UK": [
+        r"\bunited kingdom\b", r"\bu\.?k\.?\b",
+        r"\b(?:london|manchester|birmingham|edinburgh|glasgow|leeds|bristol)\b",
+        r"£", r"\bGBP\b", r"\bper annum\b",
+    ],
+    "US": [
+        r"\bunited states\b", r"\bu\.?s\.?a?\.?\b", r"\b401\(?k\)?\b", r"\bUSD\b",
+        r"\b(?:new york|san francisco|seattle|austin|boston|chicago|los angeles)\b",
+        r"\b[A-Z]{2}\s+\d{5}\b",  # US state + ZIP
+    ],
+}
+
+_CURRENCY = {"India": "INR (₹)", "US": "USD ($)", "UK": "GBP (£)", "Global": "the role's local currency"}
+
+
+def _detect_market(text: str, location: str = "") -> str:
+    """Best-effort detection of the role's country market: India|US|UK|Global."""
+    blob = f"{location}\n{text[:4000]}"
+    scores = {
+        market: sum(1 for p in pats if re.search(p, blob, re.IGNORECASE))
+        for market, pats in _MARKET_SIGNALS.items()
+    }
+    best = max(scores.values())
+    if best == 0:
+        return "Global"
+    # Deterministic priority on ties: India, then UK, then US
+    for market in ("India", "UK", "US"):
+        if scores[market] == best:
+            return market
+    return "Global"
+
+
+def _build_prompt(jd_text: str, signals: dict, onet: dict, wages: dict, demos: str,
+                  fallback: bool, market: str = "Global") -> str:
     parts = [SYSTEM_PROMPT, "\n\n=== INPUT DATA ==="]
+
+    parts.append(
+        f"\nDETECTED_MARKET: {market}. CRITICAL: every currency and income figure in "
+        f"your output MUST be expressed in {_CURRENCY.get(market, 'the local currency')}. "
+        f"Do NOT use USD unless DETECTED_MARKET is US. Use local household-income tiers "
+        f"and salary conventions for this market (e.g. LPA for India)."
+    )
 
     if fallback:
         parts.append(f"\nFALLBACK MODE: URL extraction failed. Inferred title: {signals.get('title', 'Unknown')}. Generate personas from title + industry heuristics.")
@@ -899,8 +946,13 @@ def build_persona_response(text: str = "", url: str = "", source: str = "job_des
     onet = _onet_grounding(signals.get("title", ""))
     result["_pipeline"]["onet_soc"] = onet.get("soc_code", "")
 
-    # Stage 4: CareerOneStop wages
-    wages = _careeronestop_wages(signals.get("title", ""), signals.get("location", ""))
+    # Detect the role's market so we use the right currency and wage source
+    market = _detect_market(jd_content, signals.get("location", ""))
+    result["_pipeline"]["market"] = market
+
+    # Stage 4: CareerOneStop wages — US-only (USD) source. Only use it for US
+    # roles; otherwise it would anchor the model to USD figures for non-US markets.
+    wages = _careeronestop_wages(signals.get("title", ""), signals.get("location", "")) if market == "US" else {}
     result["_pipeline"]["wages"] = wages
 
     # Stage 5: Tavily demographics
@@ -908,7 +960,7 @@ def build_persona_response(text: str = "", url: str = "", source: str = "job_des
     result["_pipeline"]["tavily_chars"] = len(demos)
 
     # Stage 6: Build prompt and call LLM
-    prompt = _build_prompt(jd_content, signals, onet, wages, demos, fallback)
+    prompt = _build_prompt(jd_content, signals, onet, wages, demos, fallback, market)
     raw = _call_llm(prompt)
 
     # Stage 7: Parse, validate, and normalize
