@@ -19,6 +19,12 @@ class OutputValidationError(ValueError):
     pass
 
 
+class LLMUnavailableError(RuntimeError):
+    """Raised when every configured LLM provider is rate-limited or unavailable
+    (HTTP 429/5xx, timeouts). Surfaced as a 503 with a user-facing message."""
+    pass
+
+
 # When false (default/production), internal pipeline fields are stripped from the
 # response so they never reach the browser. Set DEBUG_PIPELINE=1 to expose them.
 DEBUG_PIPELINE = os.environ.get("DEBUG_PIPELINE", "").lower() in ("1", "true", "yes", "on")
@@ -765,15 +771,64 @@ def _call_groq(prompt: str) -> str:
 
 
 def _call_llm(prompt: str) -> str:
-    """Gemini Flash → Groq fallback."""
+    """Gemini Flash → Groq fallback, with graceful handling of upstream rate limits.
+
+    Tries each configured provider; on a 429 it retries once, honoring the
+    provider's Retry-After header (capped at 5s). If every provider is
+    rate-limited or unavailable, raises LLMUnavailableError (→ HTTP 503) so the
+    user sees a clear "try again shortly" message instead of a generic 500.
+    """
+    if not GEMINI_KEY and not GROQ_KEY:
+        raise RuntimeError("No LLM key configured. Set GEMINI_API_KEY or GROQ_API_KEY.")
+
+    providers = []
     if GEMINI_KEY:
-        try:
-            return _call_gemini(prompt)
-        except Exception as e:
-            print(f"[nova] Gemini failed ({e}), falling back to Groq")
+        providers.append(("gemini", _call_gemini))
     if GROQ_KEY:
-        return _call_groq(prompt)
-    raise RuntimeError("No LLM key configured. Set GEMINI_API_KEY or GROQ_API_KEY.")
+        providers.append(("groq", _call_groq))
+
+    errors = []
+    for name, fn in providers:
+        for attempt in (1, 2):
+            try:
+                return fn(prompt)
+            except requests.exceptions.HTTPError as e:
+                code = getattr(e.response, "status_code", None)
+                if code == 429 and attempt == 1:
+                    wait = 2.0
+                    ra = e.response.headers.get("Retry-After") if e.response is not None else None
+                    if ra:
+                        try:
+                            wait = min(float(ra), 5.0)
+                        except ValueError:
+                            pass
+                    print(f"[nova] {name} rate-limited (429), retrying in {wait}s")
+                    time.sleep(wait)
+                    continue
+                errors.append((name, e))
+                print(f"[nova] {name} failed ({e})")
+                break
+            except Exception as e:
+                errors.append((name, e))
+                print(f"[nova] {name} failed ({e})")
+                break
+
+    # Every configured provider failed.
+    def _is_rate_limit(e):
+        return isinstance(e, requests.exceptions.HTTPError) and getattr(e.response, "status_code", None) == 429
+
+    if any(_is_rate_limit(e) for _, e in errors):
+        raise LLMUnavailableError(
+            "The AI model is receiving too many requests right now. "
+            "Please wait a minute and try again."
+        )
+    if any(isinstance(e, (requests.exceptions.Timeout, requests.exceptions.ConnectionError,
+                          requests.exceptions.HTTPError)) for _, e in errors):
+        raise LLMUnavailableError(
+            "The AI model is temporarily unavailable. Please try again in a moment."
+        )
+    # Unknown failure — re-raise so it surfaces (and gets logged) as a 500.
+    raise errors[-1][1]
 
 
 # ── Post-processing ─────────────────────────────────────────────────────────

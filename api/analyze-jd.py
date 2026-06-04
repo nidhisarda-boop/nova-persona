@@ -3,7 +3,7 @@ import time
 from collections import defaultdict, deque
 sys.path.insert(0, os.path.dirname(__file__))
 import requests
-from _lib import build_persona_response, SafetyError, OutputValidationError
+from _lib import build_persona_response, SafetyError, OutputValidationError, LLMUnavailableError
 from http.server import BaseHTTPRequestHandler
 
 # --- Rate limiting -----------------------------------------------------------
@@ -109,21 +109,18 @@ class handler(BaseHTTPRequestHandler):
         except OutputValidationError as e:
             # LLM produced malformed/unsafe output — 502, ask the user to retry
             self._json({"error": str(e), "error_type": "output_validation"}, 502)
+        except LLMUnavailableError as e:
+            # Upstream LLM rate-limited or down — 503 with a clear retry message
+            self._json({"error": str(e), "error_type": "llm_unavailable"}, 503)
         except Exception as e:
             # Log the real error to the server (visible in Vercel logs only),
             # return a generic message so internal details never reach the client.
             import traceback
-            tb = traceback.format_exc()
-            print(tb)
-            payload = {
+            traceback.print_exc()
+            self._json({
                 "error": "Something went wrong while generating personas. Please try again.",
                 "error_type": "server_error"
-            }
-            # TEMPORARY DIAGNOSTIC: reveal the exception only when X-Debug header is sent.
-            if self.headers.get("X-Debug") == "nova-temp":
-                payload["debug"] = repr(e)
-                payload["trace"] = tb[-1500:]
-            self._json(payload, 500)
+            }, 500)
 
     def _cors(self):
         # Allowlist of origins permitted to call this endpoint cross-origin.
