@@ -1387,18 +1387,35 @@ _INTERNAL_TOKENS = re.compile(
     re.IGNORECASE,
 )
 
+# Salary/data sources the model likes to fabricate (we never actually query these).
+_FAKE_SOURCES = re.compile(
+    r"\b(Salary ?Expert|Pay ?scale|Glassdoor|ZipRecruiter(?:\s+salary)?|Salary\.com|"
+    r"Indeed(?:\s+salary)?|Levels\.fyi|Comparably|Bureau of Labor Statistics|BLS"
+    r"(?:\s*data)?|LinkedIn Salary)\b[^,;|]*",
+    re.IGNORECASE,
+)
+
 
 def _scrub_internal_tokens(value):
-    """Strip internal prompt variable names (MARKET_GROUNDING, STRUCTURED_JD, …)
-    that a model may echo into output strings, so they never leak into the UI."""
+    """Strip internal prompt variable names AND fabricated source names that a
+    model may echo into output strings, so neither leaks into the UI."""
     if isinstance(value, str):
-        return _INTERNAL_TOKENS.sub("US labor-market data", value).strip()
+        s = _INTERNAL_TOKENS.sub("US labor-market norms", value)
+        s = _FAKE_SOURCES.sub("US labor-market norms", s)
+        return s.strip()
     if isinstance(value, dict):
         return {k: _scrub_internal_tokens(v) for k, v in value.items()}
     if isinstance(value, list):
         cleaned = [_scrub_internal_tokens(v) for v in value]
-        # drop list entries that became empty after scrubbing
-        return [x for x in cleaned if not (isinstance(x, str) and not x.strip())]
+        # drop emptied entries, then de-dupe consecutive identical strings
+        out = []
+        for x in cleaned:
+            if isinstance(x, str) and not x.strip():
+                continue
+            if out and isinstance(x, str) and x == out[-1]:
+                continue
+            out.append(x)
+        return out
     return value
 
 
