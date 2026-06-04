@@ -207,14 +207,18 @@ def sanitize_for_prompt(text: str) -> str:
 
 
 def _is_repetitive_garbage(text: str) -> bool:
-    """Detect strings that are mostly repeated characters (spam/garbage)."""
+    """Detect strings that are mostly repeated characters (spam/garbage).
+
+    Uses the ABSOLUTE number of distinct characters, not a ratio: real text
+    always has dozens of distinct characters regardless of length, while
+    garbage like "aaaa..." or "12121212..." has very few. (A ratio-based
+    check wrongly rejects any legitimate text longer than ~2,500 chars.)"""
     if len(text) < 50:
         return False
-    # Count unique chars relative to length
-    unique_ratio = len(set(text.lower())) / len(text)
-    if unique_ratio < 0.02:
+    # Very few distinct characters across the whole input → garbage.
+    if len(set(text.lower())) < 10:
         return True
-    # Check for very long runs of the same character
+    # A very long run of a single repeated character → garbage.
     if re.search(r"(.)\1{49,}", text):
         return True
     return False
@@ -248,36 +252,61 @@ TIMEOUT = 20
 # ── Stage 1: Jina content fetch ────────────────────────────────────────────
 
 def _extract_title_from_url(url: str) -> str:
-    """Fallback: pull job title from URL slug."""
+    """Fallback: pull a job title from the URL slug. Returns '' if the slug has
+    no real words (e.g. a numeric job ID like .../jobs/8574881002)."""
     try:
         path = urllib.parse.urlparse(url).path
         slug = path.strip("/").split("/")[-1]
         title = re.sub(r"[-_]", " ", slug).strip()
-        # Remove common noise words
         title = re.sub(r"\b(job|jobs|career|careers|apply|posting|opening)\b", "", title, flags=re.I).strip()
-        return title.title() or "Unknown Role"
+        # Reject slugs with no real alphabetic words (pure numeric IDs, etc.)
+        if not re.search(r"[A-Za-z]{2,}", title):
+            return ""
+        return title.title()
     except Exception:
-        return "Unknown Role"
+        return ""
+
+
+def _extract_jina_title(content: str) -> str:
+    """Jina Reader prefixes its output with a 'Title: ...' line — pull it out.
+    This is a far more reliable role title than the URL slug for sites like
+    Greenhouse/Lever/Workday whose URLs are just numeric IDs."""
+    m = re.match(r"\s*Title:\s*(.+)", content or "")
+    if not m:
+        return ""
+    title = m.group(1).strip()
+    # Drop trailing site-name noise after a separator (e.g. "Global Brand Manager | AB InBev")
+    title = re.split(r"\s[|–\-]\s", title)[0].strip()
+    return title if re.search(r"[A-Za-z]{2,}", title) else ""
 
 
 def _fetch_url(url: str) -> dict:
-    """Fetch job posting via Jina Reader. Returns {content, fallback_triggered, inferred_title}."""
-    try:
-        headers = {"Accept": "text/plain"}
-        if JINA_KEY:
-            headers["Authorization"] = f"Bearer {JINA_KEY}"
-        resp = requests.get(f"https://r.jina.ai/{url}", headers=headers, timeout=TIMEOUT)
-        content = resp.text if resp.status_code == 200 else ""
-    except Exception:
-        content = ""
+    """Fetch job posting via Jina Reader. Returns {content, fallback_triggered, inferred_title}.
+    Retries once on thin content (Jina can be flaky without an API key), and prefers
+    the page's own title over the URL slug."""
+    content = ""
+    for attempt in (1, 2):
+        try:
+            headers = {"Accept": "text/plain"}
+            if JINA_KEY:
+                headers["Authorization"] = f"Bearer {JINA_KEY}"
+            resp = requests.get(f"https://r.jina.ai/{url}", headers=headers, timeout=TIMEOUT)
+            content = resp.text if resp.status_code == 200 else ""
+        except Exception:
+            content = ""
+        if len(content) >= 200:
+            break
+        if attempt == 1:
+            time.sleep(1)  # brief retry for transient Jina throttling
 
-    if len(content) < 200:
-        return {
-            "content": content,
-            "fallback_triggered": True,
-            "inferred_title": _extract_title_from_url(url),
-        }
-    return {"content": content, "fallback_triggered": False, "inferred_title": ""}
+    # Prefer the page's own title (from Jina) over the URL slug.
+    inferred = _extract_jina_title(content) or _extract_title_from_url(url)
+
+    return {
+        "content": content,
+        "fallback_triggered": len(content) < 200,
+        "inferred_title": inferred,
+    }
 
 
 # ── Stage 2: O*NET occupation grounding ────────────────────────────────────
@@ -886,19 +915,15 @@ def _call_llm(prompt: str) -> str:
     def _is_rate_limit(e):
         return isinstance(e, requests.exceptions.HTTPError) and getattr(e.response, "status_code", None) == 429
 
-    _dbg = " [tried " + ", ".join(
-        f"{name}:{getattr(getattr(e,'response',None),'status_code',None) or type(e).__name__}"
-        for name, e in errors
-    ) + "]"
     if any(_is_rate_limit(e) for _, e in errors):
         raise LLMUnavailableError(
             "The AI model is receiving too many requests right now. "
-            "Please wait a minute and try again." + _dbg
+            "Please wait a minute and try again."
         )
     if any(isinstance(e, (requests.exceptions.Timeout, requests.exceptions.ConnectionError,
                           requests.exceptions.HTTPError)) for _, e in errors):
         raise LLMUnavailableError(
-            "The AI model is temporarily unavailable. Please try again in a moment." + _dbg
+            "The AI model is temporarily unavailable. Please try again in a moment."
         )
     # Unknown failure — re-raise so it surfaces (and gets logged) as a 500.
     raise errors[-1][1]
@@ -1066,7 +1091,9 @@ def build_persona_response(text: str = "", url: str = "", source: str = "job_des
 
     # Stage 2: Extract signals
     signals = _extract_signals(jd_content)
-    if fallback and inferred_title:
+    # Use the page/slug title whenever the in-text title regex came up empty
+    # (e.g. Greenhouse pages where the body starts with legal boilerplate).
+    if inferred_title:
         signals["title"] = signals.get("title") or inferred_title
     result["_pipeline"]["signals"] = signals
 
