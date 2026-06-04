@@ -1394,11 +1394,13 @@ _INTERNAL_TOKENS = re.compile(
     re.IGNORECASE,
 )
 
-# Salary/data sources the model likes to fabricate (we never actually query these).
+# Salary-data sources the model fabricates (we never query these). NOTE: bare
+# job-board names (Indeed, Glassdoor, ZipRecruiter, LinkedIn) are LEGITIMATE
+# sourcing channels, so they're only scrubbed when paired with "salary".
 _FAKE_SOURCES = re.compile(
-    r"\b(Salary ?Expert|Pay ?scale|Glassdoor|ZipRecruiter(?:\s+salary)?|Salary\.com|"
-    r"Indeed(?:\s+salary)?|Levels\.fyi|Comparably|Bureau of Labor Statistics|BLS"
-    r"(?:\s*data)?|LinkedIn Salary)\b[^,;|]*",
+    r"\b(Salary ?Expert|Pay ?scale|Salary\.com|Levels\.fyi|Comparably"
+    r"|(?:Glassdoor|Indeed|ZipRecruiter|LinkedIn)\s+salary(?:\s+data)?"
+    r"|Bureau of Labor Statistics|BLS(?:\s+data)?)\b[^,;|]*",
     re.IGNORECASE,
 )
 
@@ -1409,6 +1411,8 @@ def _scrub_internal_tokens(value):
     if isinstance(value, str):
         s = _INTERNAL_TOKENS.sub("US labor-market norms", value)
         s = _FAKE_SOURCES.sub("US labor-market norms", s)
+        # Remove leaked placeholders like "(truncated text)" / "(incomplete requirement)".
+        s = re.sub(r"\s*\((?:truncated|incomplete)[^)]*\)", "", s, flags=re.IGNORECASE)
         return s.strip()
     if isinstance(value, dict):
         return {k: _scrub_internal_tokens(v) for k, v in value.items()}
