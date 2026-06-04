@@ -10,6 +10,9 @@ from http.server import BaseHTTPRequestHandler
 RATE_LIMIT_MAX    = int(os.environ.get("RATE_LIMIT_MAX", "10"))     # requests
 RATE_LIMIT_WINDOW = int(os.environ.get("RATE_LIMIT_WINDOW", "60"))  # seconds
 
+# Max accepted request body. Rejected before the body is read into memory.
+MAX_BODY_BYTES = int(os.environ.get("MAX_BODY_BYTES", "100000"))    # 100 KB
+
 # Vercel KV / Upstash Redis REST (set automatically by the Vercel KV integration)
 _KV_URL   = os.environ.get("KV_REST_API_URL")   or os.environ.get("UPSTASH_REDIS_REST_URL")
 _KV_TOKEN = os.environ.get("KV_REST_API_TOKEN") or os.environ.get("UPSTASH_REDIS_REST_TOKEN")
@@ -73,8 +76,23 @@ class handler(BaseHTTPRequestHandler):
                 }, 429)
                 return
 
-            length = int(self.headers.get('Content-Length', 0))
-            body   = json.loads(self.rfile.read(length) or b'{}')
+            # Reject oversized payloads before reading the body into memory
+            length = int(self.headers.get('Content-Length', 0) or 0)
+            if length > MAX_BODY_BYTES:
+                self._json({
+                    "error": "Request body is too large.",
+                    "error_type": "payload_too_large"
+                }, 413)
+                return
+            # Read at most the cap (+1 to detect an under-declared Content-Length)
+            raw_body = self.rfile.read(min(length, MAX_BODY_BYTES + 1)) if length else b''
+            if len(raw_body) > MAX_BODY_BYTES:
+                self._json({
+                    "error": "Request body is too large.",
+                    "error_type": "payload_too_large"
+                }, 413)
+                return
+            body   = json.loads(raw_body or b'{}')
             text   = body.get("text", "").strip()
             url    = body.get("url", "").strip()
             if not text and not url:
