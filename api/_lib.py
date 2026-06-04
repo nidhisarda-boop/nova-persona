@@ -830,6 +830,13 @@ OUTPUT POLISH & HONESTY (V2.1 — enterprise quality):
 - JD-NATIVE CONVERSION HOOKS: pull the JD's strongest concrete selling points into conversion_hook and job_ad_rewrite where the JD states them — e.g. "dispatch from home", "company vehicle", "year-round work", "401(k) match", named certifications. A direct-fit persona's hook should lead with the JD's best perks, not generic phrasing.
 - NO UNSUPPORTED OPERATIONAL CLAIMS: never invent specific operational promises absent from the JD — no "onboarding begins within 48 hours", "instant enrollment", guaranteed timelines, or exact pay amounts not in the JD. CTAs stay benefit-led, not fabricated-specific.
 
+V1.5 INTELLIGENCE FIELDS (populate well — these are the product's wedge):
+- deal_breakers: concrete hard no's for THIS segment, specific to the JD (not generic platitudes).
+- candidate_journey: where THIS segment drops at each funnel stage (discovery → click → apply → interview → offer → early-churn). One crisp, segment-specific reason per stage.
+- evidence_confidence.confidence_breakdown: honestly bucket fields into high/medium/low. JD-sourced facts (location, salary, experience) are HIGH; inferred demographics (household income, age range) are LOW. Be honest — this is the trust feature.
+- recruiter_action.outreach_script: a real, ready-to-send 3-sentence message in the segment's tone, referencing the JD's best perks. No fabricated specifics.
+- persona_jd_mismatch (top-level): "who you want" vs "who the JD will actually attract", the gap, and the fix. Nova's wedge is WHO WILL ACTUALLY APPLY — not the company's ideal. Make this sharp and employer-brand-useful.
+
 Return ONLY valid JSON. No markdown. No explanation."""
 
 
@@ -1013,6 +1020,12 @@ def _build_prompt(jd_text: str, signals: dict, onet: dict, wages: dict, demos: s
     "bullet_to_remove": "string",
     "cta_improvement": "string"
   },
+  "persona_jd_mismatch": {
+    "you_want": "string — the candidate the company is clearly trying to hire, in one phrase",
+    "jd_attracts": "string — who the JD as written will ACTUALLY attract (often broader/different)",
+    "mismatch": "string — the specific gap between the two (what the JD under- or over-states)",
+    "fix": "string — the concrete JD change that closes the gap"
+  },
   "personas": [
     {
       "metadata": {
@@ -1045,6 +1058,15 @@ def _build_prompt(jd_text: str, signals: dict, onet: dict, wages: dict, demos: s
           "churn_trigger": "string — single operational change causing ghosting"
         }
       },
+      "deal_breakers": ["string — concrete hard no's for THIS segment that would stop them applying or accepting (e.g. 'pay below market', 'no remote flexibility', 'unclear shift schedule', 'no company vehicle', 'too much travel', 'no promotion path'). 3-5 items, specific to this pool and the JD."],
+      "candidate_journey": {
+        "discovery_risk": "string — why this segment may never SEE the role (wrong channels, weak title)",
+        "click_risk": "string — why they may ignore the ad even if they see it",
+        "apply_risk": "string — why they may abandon the application form",
+        "interview_risk": "string — why they may disengage during interviews",
+        "offer_risk": "string — why they may reject the offer",
+        "early_churn_risk": "string — why they may leave within the first 90 days"
+      },
       "tech_profile": {
         "key_apps": ["string — apps/platforms this segment lives in, useful for sourcing"],
         "tech_savviness_score": "integer 1-5 — GIG/HOURLY/FRONTLINE ONLY; set null for corporate/professional",
@@ -1053,6 +1075,11 @@ def _build_prompt(jd_text: str, signals: dict, onet: dict, wages: dict, demos: s
       "evidence_confidence": {
         "overall_score": 80,
         "sourced_vs_inferred": "string — plainly state what is grounded in the JD/data vs what is inferred",
+        "confidence_breakdown": {
+          "high": ["string — fields you are confident about, typically JD-sourced: e.g. 'Location', 'Salary', 'Experience requirement'"],
+          "medium": ["string — partially grounded: e.g. 'Source companies', 'Likely motivation'"],
+          "low": ["string — mostly inferred: e.g. 'Household income', 'Age range', 'Churn trigger'"]
+        },
         "evidence_basis": ["string — ONLY sources actually supplied in INPUT DATA; otherwise exactly 'Inferred from JD requirements; external salary source not used'"],
         "notes": "string"
       },
@@ -1073,6 +1100,7 @@ def _build_prompt(jd_text: str, signals: dict, onet: dict, wages: dict, demos: s
           "headline": "string — persona-specific ad headline (different for each persona)",
           "core_value_prop": "string — the pitch that resonates with THIS pool specifically"
         },
+        "outreach_script": "string — a ready-to-send 3-sentence outreach/InMail tuned to THIS segment's tone and primary motivation (consultative/executive for senior pools; stability+ownership for agency leavers; benefits+steady-pay for frontline). Reference the JD's best perks. No fabricated specifics.",
         "application_dropoff_risk": {
           "risk": "string — why THIS segment abandons before applying or declines the offer",
           "fix": "string — the specific change to JD/process/messaging that removes that drop-off"
@@ -1350,6 +1378,7 @@ def validate_output(data: dict) -> dict:
     data.setdefault("local_context", {})
     data.setdefault("diversity_scoring", {})
     data.setdefault("job_ad_rewrite", {})
+    data.setdefault("persona_jd_mismatch", {})
 
     personas = data.get("personas")
     if not isinstance(personas, list) or not personas:
