@@ -3,7 +3,7 @@ import time
 from collections import defaultdict, deque
 sys.path.insert(0, os.path.dirname(__file__))
 import requests
-from _lib import build_persona_response, SafetyError
+from _lib import build_persona_response, SafetyError, OutputValidationError
 from http.server import BaseHTTPRequestHandler
 
 # --- Rate limiting -----------------------------------------------------------
@@ -83,8 +83,11 @@ class handler(BaseHTTPRequestHandler):
             result = build_persona_response(text=text, url=url)
             self._json(result)
         except SafetyError as e:
-            # User-facing validation error — 400, not 500
+            # User-facing input validation error — 400
             self._json({"error": str(e), "error_type": "input_validation"}, 400)
+        except OutputValidationError as e:
+            # LLM produced malformed/unsafe output — 502, ask the user to retry
+            self._json({"error": str(e), "error_type": "output_validation"}, 502)
         except Exception as e:
             self._json({"error": str(e)}, 500)
 

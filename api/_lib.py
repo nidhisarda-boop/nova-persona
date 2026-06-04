@@ -13,6 +13,12 @@ class SafetyError(ValueError):
     pass
 
 
+class OutputValidationError(ValueError):
+    """Raised when the LLM output fails schema validation. Not the user's fault —
+    surfaced as a 502 so the frontend can ask the user to retry."""
+    pass
+
+
 # Private/reserved IP ranges that must never be fetched (SSRF protection)
 _PRIVATE_RANGES = [
     ipaddress.ip_network("10.0.0.0/8"),
@@ -746,6 +752,73 @@ def _parse_json(raw: str) -> dict:
     raise ValueError(f"No valid JSON in LLM response. Preview: {raw[:300]}")
 
 
+# Top-level keys the frontend depends on
+_REQUIRED_TOP_KEYS = [
+    "jd_hard_filters", "role_summary", "recruiter_brief",
+    "personas", "job_ad_rewrite",
+]
+_MAX_PERSONAS = 10
+
+
+def _scan_for_injection(value, _depth=0):
+    """Recursively walk the output and raise if any string field echoes a prompt
+    injection sequence (e.g. the model parroting 'ignore previous instructions'
+    or '<system>' back into a persona name). Guards the browser from rendering
+    attacker-controlled control text."""
+    if _depth > 12:  # defensive against pathological nesting
+        return
+    if isinstance(value, str):
+        for pat in _INJECTION_PATTERNS:
+            if re.search(pat, value, re.IGNORECASE):
+                raise OutputValidationError(
+                    "The generated persona failed a safety check. Please try again."
+                )
+    elif isinstance(value, dict):
+        for v in value.values():
+            _scan_for_injection(v, _depth + 1)
+    elif isinstance(value, list):
+        for v in value:
+            _scan_for_injection(v, _depth + 1)
+
+
+def validate_output(data: dict) -> dict:
+    """Schema-validate the LLM persona payload before it reaches the browser.
+    Raises OutputValidationError on anything malformed, missing, or unsafe.
+    Clamps out-of-range numerics in place rather than failing the whole request."""
+    if not isinstance(data, dict):
+        raise OutputValidationError("Model returned a non-object response.")
+
+    missing = [k for k in _REQUIRED_TOP_KEYS if k not in data]
+    if missing:
+        raise OutputValidationError(
+            f"Model response was missing required fields: {', '.join(missing)}."
+        )
+
+    personas = data.get("personas")
+    if not isinstance(personas, list) or not personas:
+        raise OutputValidationError("Model response contained no personas.")
+    if len(personas) > _MAX_PERSONAS:
+        raise OutputValidationError("Model returned an implausible number of personas.")
+
+    for p in personas:
+        if not isinstance(p, dict):
+            raise OutputValidationError("Model returned a malformed persona entry.")
+        meta = p.get("metadata")
+        if not isinstance(meta, dict):
+            raise OutputValidationError("Persona is missing its metadata block.")
+        name = meta.get("name")
+        if not isinstance(name, str) or not name.strip():
+            raise OutputValidationError("Persona is missing a name.")
+        # Clamp segment size to a sane range rather than trusting the model
+        seg = meta.get("segment_size_percentage", 0)
+        if not isinstance(seg, (int, float)) or isinstance(seg, bool) or not (0 <= seg <= 100):
+            meta["segment_size_percentage"] = 0
+
+    # Reject any injection text the model may have echoed into output strings
+    _scan_for_injection(data)
+    return data
+
+
 # ── Main entry point ────────────────────────────────────────────────────────
 
 def build_persona_response(text: str = "", url: str = "", source: str = "job_description") -> dict:
@@ -817,8 +890,9 @@ def build_persona_response(text: str = "", url: str = "", source: str = "job_des
     prompt = _build_prompt(jd_content, signals, onet, wages, demos, fallback)
     raw = _call_llm(prompt)
 
-    # Stage 7: Parse and normalize
+    # Stage 7: Parse, validate, and normalize
     data = _parse_json(raw)
+    data = validate_output(data)      # schema + safety check before it leaves the server
     data = _normalize_segments(data)
 
     # Metadata
