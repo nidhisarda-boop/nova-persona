@@ -732,6 +732,13 @@ FIELD RICHNESS & HONESTY (V2):
 - recruiter_action: sourcing and conversion must be concrete and executable — specific platforms, example search filters, and example employer names as ILLUSTRATIONS — consistent with the role's market and currency.
 - PROOFREAD everything before returning. Correct spelling, correct brand and product names, no typos or garbled words. The job_ad_rewrite.recommended_headline in particular must be clean, correct, and free of errors.
 
+OUTPUT POLISH & HONESTY (V2.1 — enterprise quality):
+- ONE PERSONA PER DISTINCT POOL: if the JD describes distinct functional areas (e.g. campaign execution, creative studio / content operations, media planning, agency management), give each its own persona rather than merging them. A creative-studio/content-ops pool is distinct from a media-planning pool and from an agency-campaign-lead pool — if the JD covers all of them, prefer the upper end of the persona band so each is represented.
+- NEVER INVENT COMPANY POLICY: drop-off fixes must not assert benefits or policies the JD does not state (remote work, comp, perks). If unknown, recommend CLARIFYING in the JD — e.g. "Clarify onsite expectations and any flexibility for global-coordination calls", NOT "Add that remote days are permitted."
+- NO UNSUPPORTED BRAND NAMES: do not name specific brands/products (e.g. Budweiser) unless they appear in the JD. Otherwise say "AB InBev's portfolio" or "the brand."
+- PLAIN-ENGLISH EVIDENCE: evidence_basis must use human-readable source descriptions ("the job posting", "US labor-market norms"). NEVER emit internal variable names (MARKET_GROUNDING, STRUCTURED_JD, ONET_GROUNDING) — those are not sources.
+- PROOFREAD: put a space between a number and its unit ("1 billion", not "1billion"). Never emit placeholders like "(truncated…)". When quoting a JD line to remove, quote it in full or paraphrase it — never a fragment.
+
 Return ONLY valid JSON. No markdown. No explanation."""
 
 
@@ -831,6 +838,7 @@ def _build_prompt(jd_text: str, signals: dict, onet: dict, wages: dict, demos: s
   "recruiter_brief": "string",
   "local_context": {
     "metro_area": "string — the specific city/metro, never a national aggregate",
+    "posted_compensation": "string — the salary/comp stated in the JD, verbatim, or null if none stated",
     "cost_of_living_index": "Low|Medium|High|Very High",
     "role_type": "gig|hourly|salaried|contract",
     "hiring_volume": "single-seat|moderate|high-volume"
@@ -1215,6 +1223,27 @@ def validate_output(data: dict) -> dict:
     return data
 
 
+_INTERNAL_TOKENS = re.compile(
+    r"(MARKET[_ ]?GROUNDING(?:[._ ]?demographic[_ ]?signals)?"
+    r"|STRUCTURED[_ ]?JD|ONET[_ ]?GROUNDING)",
+    re.IGNORECASE,
+)
+
+
+def _scrub_internal_tokens(value):
+    """Strip internal prompt variable names (MARKET_GROUNDING, STRUCTURED_JD, …)
+    that a model may echo into output strings, so they never leak into the UI."""
+    if isinstance(value, str):
+        return _INTERNAL_TOKENS.sub("US labor-market data", value).strip()
+    if isinstance(value, dict):
+        return {k: _scrub_internal_tokens(v) for k, v in value.items()}
+    if isinstance(value, list):
+        cleaned = [_scrub_internal_tokens(v) for v in value]
+        # drop list entries that became empty after scrubbing
+        return [x for x in cleaned if not (isinstance(x, str) and not x.strip())]
+    return value
+
+
 # ── Main entry point ────────────────────────────────────────────────────────
 
 def build_persona_response(text: str = "", url: str = "", source: str = "job_description") -> dict:
@@ -1312,6 +1341,12 @@ def build_persona_response(text: str = "", url: str = "", source: str = "job_des
     data = _parse_json(raw)
     data = validate_output(data)      # schema + safety check before it leaves the server
     data = _normalize_segments(data)
+    data = _scrub_internal_tokens(data)   # strip any leaked internal variable names
+
+    # Guarantee the posted salary shows even if the model omitted it from local_context.
+    lc = data.get("local_context")
+    if isinstance(lc, dict) and not lc.get("posted_compensation") and signals.get("salary"):
+        lc["posted_compensation"] = signals["salary"]
 
     # Debug internals — only exposed when DEBUG_PIPELINE is enabled.
     if DEBUG_PIPELINE:

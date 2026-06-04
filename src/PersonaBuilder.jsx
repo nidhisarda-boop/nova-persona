@@ -655,6 +655,12 @@ function Banner({ data }) {
               {local_context.metro_area}
             </span>
           )}
+          {local_context.posted_compensation && (
+            <span style={{ ...S.localCtxChip, background: "#ecfdf5", borderColor: "#a7f3d0" }}>
+              <span style={{ ...S.localCtxKey, color: "#047857" }}>Posted comp: </span>
+              {local_context.posted_compensation}
+            </span>
+          )}
           {local_context.cost_of_living_index && (
             <span style={S.localCtxChip}>
               <span style={S.localCtxKey}>COL Index: </span>
