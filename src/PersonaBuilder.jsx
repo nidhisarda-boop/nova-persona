@@ -306,6 +306,9 @@ const S = {
     display: "flex",
     flexDirection: "column",
     position: "relative",
+    // Don't let a card split across a printed/PDF page (causes garbled text at the break).
+    breakInside: "avoid",
+    pageBreakInside: "avoid",
   }),
   cardHeader: {
     display: "flex",
@@ -429,6 +432,8 @@ const S = {
     border: `1.5px solid ${border}`,
     borderRadius: 10,
     padding: "12px 14px",
+    breakInside: "avoid",
+    pageBreakInside: "avoid",
   }),
   panelTitle: {
     fontSize: 11,
