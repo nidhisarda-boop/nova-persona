@@ -655,12 +655,6 @@ function Banner({ data }) {
               {local_context.metro_area}
             </span>
           )}
-          {local_context.median_hh_income && (
-            <span style={S.localCtxChip}>
-              <span style={S.localCtxKey}>Median HH: </span>
-              {local_context.median_hh_income}
-            </span>
-          )}
           {local_context.cost_of_living_index && (
             <span style={S.localCtxChip}>
               <span style={S.localCtxKey}>COL Index: </span>
@@ -747,20 +741,10 @@ function ConfidencePanel({ evidence_confidence }) {
   if (!evidence_confidence) return null;
   const {
     overall_score,
-    salary_confidence,
-    education_confidence,
-    demographic_confidence,
-    motivation_confidence,
+    sourced_vs_inferred,
     notes,
     evidence_basis,
   } = evidence_confidence;
-
-  const tags = [
-    { label: "Salary", level: salary_confidence },
-    { label: "Education", level: education_confidence },
-    { label: "Demographic", level: demographic_confidence },
-    { label: "Motivation", level: motivation_confidence },
-  ];
 
   return (
     <div style={S.panel("#f8fafc", "#e2e8f0")}>
@@ -790,16 +774,12 @@ function ConfidencePanel({ evidence_confidence }) {
         >
           {overall_score}%
         </div>
-        <div style={S.confRow}>
-          {tags.map(({ label, level }) => {
-            const [color, bg] = confidenceColor(level);
-            return (
-              <span key={label} style={S.confTag(color, bg)}>
-                {label}: {level || "—"}
-              </span>
-            );
-          })}
-        </div>
+        {sourced_vs_inferred && (
+          <div style={{ fontSize: 12, color: "#475569", lineHeight: 1.5, flex: 1, minWidth: 200 }}>
+            <span style={{ fontWeight: 700, color: "#64748b" }}>Sourced vs inferred: </span>
+            {sourced_vs_inferred}
+          </div>
+        )}
       </div>
       {notes && (
         <div style={{ fontSize: 12, color: "#64748b", lineHeight: 1.5, marginBottom: 6 }}>
@@ -1179,9 +1159,10 @@ const DEFINITIONS = [
     items: [
       ["Segment Size %", "The share of the qualified candidate pool this persona represents. All personas in a map add up to 100%."],
       ["Archetype", "A short label for the persona's real prior background and path into the role (e.g. \"Agency Campaign Operator\") — not a personality type."],
-      ["Tech Savviness (out of 5)", "How comfortable this segment is with digital tools. 1 = minimal, needs assisted use · 2 = basic apps · 3 = confident everyday user · 4 = advanced, multi-tool · 5 = highly technical power user."],
+      ["Tech Savviness (out of 5)", "How comfortable this segment is with digital tools. 1 = minimal, needs assisted use · 2 = basic apps · 3 = confident everyday user · 4 = advanced, multi-tool · 5 = highly technical power user. Shown for gig, hourly, and frontline roles only — for office/corporate roles it's always high, so it carries no signal and is hidden."],
       ["Evidence Confidence (0–100%)", "How well-supported this persona is by the JD and any external data. High ≥ 75% · Medium 50–74% · Low < 50%. Lower scores mean more of the persona is inferred."],
-      ["Salary / Education / Demographic Confidence", "Confidence in that specific dimension — High, Medium, or Low — based on whether it came from the JD/data or was inferred."],
+      ["Sourced vs Inferred", "A plain statement of which parts of the persona are grounded in the JD or real data versus inferred by the model — so you know exactly how much to trust each card."],
+      ["Key Apps", "The apps and platforms this segment lives in — useful for knowing where to source and reach them."],
     ],
   },
   {
@@ -1190,7 +1171,7 @@ const DEFINITIONS = [
       ["Household Income Tier", "Where the persona's household sits on the local income scale: Lower · Lower-middle · Middle · Upper-middle · Upper. Bands are calibrated to the role's country and cost of living (US Pew tiers for US roles, local tiers for India/UK)."],
       ["Income Dependency", "How much this role's pay matters to the household. Primary = main or sole income · Secondary = a second household income · Supplemental = a top-up to other earnings."],
       ["Target Monthly Income", "The gross monthly pay this segment expects from the role, anchored to the JD's stated salary when available."],
-      ["Payment Preference", "How and how often the segment prefers to be paid (e.g. Daily instant, Weekly, Monthly) — most relevant for gig and hourly roles."],
+      ["Payment Preference", "How and how often the segment prefers to be paid (e.g. Daily instant, Weekly, Monthly). Shown for gig and hourly roles only — salaried roles are always monthly, so it's hidden there."],
     ],
   },
   {

@@ -606,6 +606,10 @@ SELF-VALIDATION — Before returning output, check all of these. If any fail, re
 ✗ REJECT if two or more personas share the same sourcing_channel.primary
 ✗ REJECT if gig role has no persona addressing vehicle access barrier or competing platform users
 
+CONDITIONAL FIELDS (avoid no-signal filler):
+- hours_per_week_expected, payment_preference (financials) and tech_savviness_score, hardware_devices (tech_profile) carry signal ONLY for gig_flexible / hourly_frontline / licensed_skilled frontline roles. For corporate_professional and executive_specialist presets these are constant noise — set them to null. Do NOT invent laptop/phone models or a "5/5" tech score for office roles.
+- key_apps stays for all roles (it informs sourcing — where the segment actually spends time).
+
 FIELD RICHNESS & HONESTY (V2):
 - tech_profile.hardware_devices and key_apps: give specific, realistic examples for THIS segment (e.g. a digital marketer: "Figma", "Google Analytics 4", "Slack", "Asana"; a field gig worker: "budget Android phone", "Google Maps", "the platform app"). Treat these as ILLUSTRATIVE inferences, never as verified facts, and never build evidence claims on them.
 - household_income_note: explain the financial pressure or motivation implication for this segment (e.g. "moving from volatile agency bonuses to a predictable corporate base; motivated by stability and 401(k) match more than raw base") — do not merely restate the number.
@@ -705,8 +709,7 @@ def _build_prompt(jd_text: str, signals: dict, onet: dict, wages: dict, demos: s
   "role_summary": "string",
   "recruiter_brief": "string",
   "local_context": {
-    "metro_area": "string",
-    "median_hh_income": "string",
+    "metro_area": "string — the specific city/metro, never a national aggregate",
     "cost_of_living_index": "Low|Medium|High|Very High",
     "role_type": "gig|hourly|salaried|contract",
     "hiring_volume": "single-seat|moderate|high-volume"
@@ -740,11 +743,11 @@ def _build_prompt(jd_text: str, signals: dict, onet: dict, wages: dict, demos: s
       "financials": {
         "pew_household_income_tier": "Lower|Lower-middle|Middle|Upper-middle|Upper",
         "household_income_range": "string",
-        "household_income_note": "string — financial pressure implication for this persona",
+        "household_income_note": "string — financial pressure/motivation implication, not a restatement of the number",
         "target_monthly_income_from_role": "string",
-        "hours_per_week_expected": "string",
         "income_dependency": "Primary|Secondary|Supplemental",
-        "payment_preference": "Daily instant|Weekly|Monthly"
+        "hours_per_week_expected": "string — GIG/HOURLY/FRONTLINE ONLY; set null for salaried/corporate",
+        "payment_preference": "Daily instant|Weekly|Monthly — GIG/HOURLY/FRONTLINE ONLY; set null for salaried/corporate"
       },
       "drivers_and_friction": {
         "primary_motivation": "string — specific, not generic",
@@ -757,18 +760,15 @@ def _build_prompt(jd_text: str, signals: dict, onet: dict, wages: dict, demos: s
         }
       },
       "tech_profile": {
-        "tech_savviness_score": 3,
-        "hardware_devices": ["string"],
-        "key_apps": ["string"]
+        "key_apps": ["string — apps/platforms this segment lives in, useful for sourcing"],
+        "tech_savviness_score": "integer 1-5 — GIG/HOURLY/FRONTLINE ONLY; set null for corporate/professional",
+        "hardware_devices": "array — GIG/HOURLY/FRONTLINE ONLY (e.g. budget Android); set null for corporate/professional"
       },
       "evidence_confidence": {
         "overall_score": 80,
-        "salary_confidence": "High|Medium|Low",
-        "education_confidence": "High|Medium|Low",
-        "demographic_confidence": "High|Medium|Low",
-        "motivation_confidence": "Inferred",
-        "notes": "string",
-        "evidence_basis": ["string", "string"]
+        "sourced_vs_inferred": "string — plainly state what is grounded in the JD/data vs what is inferred",
+        "evidence_basis": ["string — ONLY sources actually supplied in INPUT DATA; otherwise exactly 'Inferred from JD requirements; external salary source not used'"],
+        "notes": "string"
       },
       "screening_question": {
         "question": "string — recommended diagnostic interview/onboarding question for THIS segment",
