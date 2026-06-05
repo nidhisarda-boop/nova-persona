@@ -613,36 +613,53 @@ def _enrich_salary(title: str, location: str, market: str, content: str) -> dict
     if not cc:
         _LAST_ADZUNA_DIAG["reason"] = f"no_adzuna_country_for_market ({market})"
         return {}
-    try:
-        params = {
-            "app_id": ADZUNA_APP_ID, "app_key": ADZUNA_APP_KEY,
-            "what": title, "results_per_page": 30, "content-type": "application/json",
-        }
-        if location:
-            params["where"] = location
-        r = requests.get(
-            f"https://api.adzuna.com/v1/api/jobs/{cc}/search/1", params=params, timeout=TIMEOUT
-        )
-        _LAST_ADZUNA_DIAG["http_status"] = r.status_code
-        if r.status_code != 200:
-            _LAST_ADZUNA_DIAG["reason"] = f"http_{r.status_code} (likely bad credentials if 401/403)"
-            return {}
-        d = r.json()
-        mean = d.get("mean")
-        _LAST_ADZUNA_DIAG["count"] = d.get("count", 0)
-        if not mean:
-            _LAST_ADZUNA_DIAG["reason"] = "no_mean_in_response (no salary data for this title×location)"
-            return {}
-        sals = [x.get("salary_min") for x in d.get("results", []) if x.get("salary_min")]
-        sals += [x.get("salary_max") for x in d.get("results", []) if x.get("salary_max")]
-        out = {"source": "Adzuna", "country": cc.upper(), "mean": round(mean), "count": d.get("count", 0)}
-        if sals:
-            out["low"], out["high"] = round(min(sals)), round(max(sals))
-        _LAST_ADZUNA_DIAG["reason"] = "ok"
-        return out
-    except Exception as e:
-        _LAST_ADZUNA_DIAG["reason"] = f"exception: {type(e).__name__}"
-        return {}
+
+    # Attempt chain — narrow to broad. City salary coverage is patchy on Adzuna,
+    # so if the title × city query has no salaried postings, fall back to a
+    # national title benchmark (still real, sourced data — just country-level).
+    attempts = []
+    if location:
+        attempts.append((location, "city"))
+    attempts.append((None, "national"))
+
+    last_reason = "no_mean_in_response (no salary data for this title×location)"
+    for where, geo in attempts:
+        try:
+            params = {
+                "app_id": ADZUNA_APP_ID, "app_key": ADZUNA_APP_KEY,
+                "what": title, "results_per_page": 50, "content-type": "application/json",
+            }
+            if where:
+                params["where"] = where
+            r = requests.get(
+                f"https://api.adzuna.com/v1/api/jobs/{cc}/search/1", params=params, timeout=TIMEOUT
+            )
+            _LAST_ADZUNA_DIAG["http_status"] = r.status_code
+            _LAST_ADZUNA_DIAG["geo"] = geo
+            if r.status_code != 200:
+                last_reason = f"http_{r.status_code} (likely bad credentials if 401/403)"
+                _LAST_ADZUNA_DIAG["reason"] = last_reason
+                continue
+            d = r.json()
+            mean = d.get("mean")
+            _LAST_ADZUNA_DIAG["count"] = d.get("count", 0)
+            if not mean:
+                last_reason = f"no_mean ({geo} query had no salaried postings)"
+                _LAST_ADZUNA_DIAG["reason"] = last_reason
+                continue
+            sals = [x.get("salary_min") for x in d.get("results", []) if x.get("salary_min")]
+            sals += [x.get("salary_max") for x in d.get("results", []) if x.get("salary_max")]
+            out = {"source": "Adzuna", "country": cc.upper(), "mean": round(mean),
+                   "count": d.get("count", 0), "geo": geo}
+            if sals:
+                out["low"], out["high"] = round(min(sals)), round(max(sals))
+            _LAST_ADZUNA_DIAG["reason"] = f"ok ({geo})"
+            return out
+        except Exception as e:
+            last_reason = f"exception: {type(e).__name__}"
+            _LAST_ADZUNA_DIAG["reason"] = last_reason
+            continue
+    return {}
 
 
 def _enrich_income(market: str) -> dict:
@@ -1893,10 +1910,23 @@ def build_persona_response(text: str = "", url: str = "", source: str = "job_des
                 "DE": ("€", "EUR"), "FR": ("€", "EUR"), "ES": ("€", "EUR"),
                 "IT": ("€", "EUR"), "AT": ("€", "EUR"), "BE": ("€", "EUR"),
                 "PL": ("zł", "PLN")}
+        _CC_NAME = {"US": "United States", "GB": "United Kingdom", "IN": "India",
+                    "CA": "Canada", "AU": "Australia", "NL": "Netherlands",
+                    "DE": "Germany", "FR": "France", "ES": "Spain", "IT": "Italy",
+                    "AT": "Austria", "BE": "Belgium", "PL": "Poland"}
         cc = (salary_data.get("country") or "").upper()
         sym, code = _CUR.get(cc, ("", ""))
+        is_national = salary_data.get("geo") == "national"
         title_lbl = (resolved_title or "this role").strip()
         loc_lbl = (resolved_loc or "this market").strip()
+        if is_national:
+            geo_lbl = f"{_CC_NAME.get(cc, cc)} (national)"
+            note = ("National market average for this title — no city-level salary data was "
+                    "available for this location. Not the salary in this posting (which did not state one).")
+        else:
+            geo_lbl = loc_lbl
+            note = ("Typical market value for this title in this city, averaged across live job "
+                    "postings. Not the salary in this posting (which did not state one).")
         data["market_salary"] = {
             "average": salary_data["mean"],
             "low": salary_data.get("low"),
@@ -1905,12 +1935,13 @@ def build_persona_response(text: str = "", url: str = "", source: str = "job_des
             "currency_code": code,
             "country": cc,
             "title": title_lbl,
-            "location": loc_lbl,
-            "basis": f"{title_lbl} × {loc_lbl}",
+            "location": geo_lbl,
+            "basis": f"{title_lbl} × {geo_lbl}",
             "posting_count": salary_data.get("count"),
             "source": "Adzuna market data",
             "confidence": _ms_conf,
-            "note": "Typical market value for this title in this city, averaged across live job postings. Not the salary in this posting (which did not state one).",
+            "scope": "national" if is_national else "city",
+            "note": note,
         }
 
     # Keep the displayed persona count consistent with the actual cards (no
