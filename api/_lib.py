@@ -2003,7 +2003,7 @@ def build_persona_response(text: str = "", url: str = "", source: str = "job_des
             "posting_count": salary_data.get("count"),
             "source": "Adzuna market data",
             "confidence": _ms_conf,
-            "scope": "national" if is_national else "city",
+            "scope": geo,
             "note": note,
         }
 
