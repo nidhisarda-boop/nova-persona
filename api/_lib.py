@@ -571,6 +571,27 @@ def _adzuna_country(market: str, blob: str) -> str:
     return ""
 
 
+def _title_from_summary(summary: str) -> str:
+    """Pull a clean job title out of the LLM's role_summary sentence, e.g.
+    'The Shift Leader at Whataburger in San Antonio will…' -> 'Shift Leader'.
+    Used as a fallback when deterministic title extraction came up empty."""
+    if not summary:
+        return ""
+    m = re.match(
+        r"\s*(?:The|A|An)?\s*([A-Z][\w/&.+-]*(?:\s+[\w/&.+-]+){0,5}?)\s+"
+        r"(?:at|in|is|are|will|would|role\b|position\b|responsible|oversees?|"
+        r"manages?|leads?|handles?|drives?|supports?)\b",
+        summary,
+    )
+    if not m:
+        return ""
+    title = re.sub(r"\s+", " ", m.group(1)).strip(" .,-")
+    # Reject if it grabbed a whole clause or obvious non-title
+    if len(title.split()) > 6 or len(title) < 3:
+        return ""
+    return title
+
+
 _LAST_ADZUNA_DIAG = {}  # TEMP DEBUG: records why the last Adzuna call did/didn't fire
 
 def _enrich_salary(title: str, location: str, market: str, content: str) -> dict:
@@ -991,7 +1012,27 @@ _MARKET_SIGNALS = {
     ],
     "US": [
         r"\bunited states\b", r"\bu\.?s\.?a?\.?\b", r"\b401\(?k\)?\b", r"\bUSD\b",
-        r"\b(?:new york|san francisco|seattle|austin|boston|chicago|los angeles)\b",
+        r"\bserv\s?safe\b", r"\bOSHA\b", r"\bGED\b", r"\bH-?1B\b", r"\bEEO\b",
+        # Major US metros (broad coverage, not just tech hubs)
+        r"\b(?:new york|san francisco|seattle|austin|boston|chicago|los angeles|"
+        r"san antonio|dallas|houston|fort worth|phoenix|philadelphia|san diego|"
+        r"san jose|jacksonville|columbus|charlotte|indianapolis|denver|nashville|"
+        r"oklahoma city|el paso|las vegas|detroit|memphis|portland|miami|atlanta|"
+        r"baltimore|milwaukee|albuquerque|tucson|fresno|sacramento|kansas city|"
+        r"omaha|raleigh|tampa|orlando|cleveland|cincinnati|pittsburgh|st\.?\s?louis|"
+        r"minneapolis|new orleans|salt lake city|san bernardino)\b",
+        # US state names
+        r"\b(?:alabama|alaska|arizona|arkansas|california|colorado|connecticut|"
+        r"delaware|florida|georgia|hawaii|idaho|illinois|indiana|iowa|kansas|"
+        r"kentucky|louisiana|maryland|massachusetts|michigan|minnesota|mississippi|"
+        r"missouri|montana|nebraska|nevada|new hampshire|new jersey|new mexico|"
+        r"north carolina|north dakota|ohio|oklahoma|oregon|pennsylvania|"
+        r"rhode island|south carolina|south dakota|tennessee|texas|utah|vermont|"
+        r"virginia|washington|west virginia|wisconsin|wyoming)\b",
+        # "City, ST" state abbreviations
+        r",\s*(?:AL|AK|AZ|AR|CA|CO|CT|DE|FL|GA|HI|ID|IL|IN|IA|KS|KY|LA|ME|MD|MA|"
+        r"MI|MN|MS|MO|MT|NE|NV|NH|NJ|NM|NY|NC|ND|OH|OK|OR|PA|RI|SC|SD|TN|TX|UT|"
+        r"VT|VA|WA|WV|WI|WY)\b",
         r"\b[A-Z]{2}\s+\d{5}\b",  # US state + ZIP
     ],
 }
@@ -1807,6 +1848,32 @@ def build_persona_response(text: str = "", url: str = "", source: str = "job_des
         if not lc.get("metro_area") and signals.get("location"):
             lc["metro_area"] = signals["location"]
 
+    # Resolve the best title + location we have, preferring deterministic signals
+    # but falling back to the LLM's own role_summary / metro when extraction missed.
+    _lcd = lc if isinstance(lc, dict) else {}
+    resolved_title = (signals.get("title") or _title_from_summary(data.get("role_summary", ""))).strip()
+    resolved_loc = (signals.get("location") or _lcd.get("metro_area") or "").strip()
+
+    # Post-LLM enrichment RETRY: the pre-LLM pass needs title + a country market,
+    # which deterministic extraction sometimes misses (no labeled title line, or a
+    # metro the signal list didn't know). Now that we have the LLM's title + metro,
+    # re-detect the market and try Adzuna once more before giving up.
+    if ENABLE_ENRICHMENT and not (salary_data and salary_data.get("mean")) and resolved_title:
+        market2 = market
+        if market2 == "Global":
+            market2 = _detect_market(f"{data.get('role_summary','')}\n{resolved_loc}", resolved_loc)
+            if market2 == "Global":
+                market2 = _market_from_url(url) or "Global"
+        if market2 != "Global":
+            retry = _enrich_salary(resolved_title, resolved_loc, market2, jd_content)
+            result["_pipeline"]["adzuna_retry"] = retry
+            _adzuna_diag = dict(_LAST_ADZUNA_DIAG)  # TEMP DEBUG: reflect the retry
+            if retry and retry.get("mean"):
+                salary_data = retry
+                market = market2
+                if not income_data:
+                    income_data = _enrich_income(market2)
+
     # Role-level MARKET SALARY RANGE — typical market value for this title × city,
     # taken DETERMINISTICALLY from the Adzuna response (not the LLM) so it is
     # reliable and always carries the real source label. Only attached when the
@@ -1828,8 +1895,8 @@ def build_persona_response(text: str = "", url: str = "", source: str = "job_des
                 "PL": ("zł", "PLN")}
         cc = (salary_data.get("country") or "").upper()
         sym, code = _CUR.get(cc, ("", ""))
-        title_lbl = (signals.get("title") or "this role").strip()
-        loc_lbl = (signals.get("location") or (lc.get("metro_area") if isinstance(lc, dict) else "") or "this market").strip()
+        title_lbl = (resolved_title or "this role").strip()
+        loc_lbl = (resolved_loc or "this market").strip()
         data["market_salary"] = {
             "average": salary_data["mean"],
             "low": salary_data.get("low"),
