@@ -783,6 +783,7 @@ SELF-VALIDATION — Before returning output, check all of these. If any fail, re
 ✗ REJECT if any persona's sourcing_channel lacks a real boolean search_string or has fewer than 5 target_companies
 ✗ REJECT if any persona is missing application_dropoff_risk.risk and .fix
 ✗ REJECT if two personas share the same conversion_hook.headline
+✗ REJECT if deal_breakers are identical across personas or merely restate the JD's hard requirements (they must be the CANDIDATE's segment-specific objections)
 ✗ REJECT if all primary_motivations are variations of "flexibility and autonomy"
 ✗ REJECT if two or more personas share the same sourcing_channel.primary
 ✗ REJECT if gig role has no persona addressing vehicle access barrier or competing platform users
@@ -1058,7 +1059,7 @@ def _build_prompt(jd_text: str, signals: dict, onet: dict, wages: dict, demos: s
           "churn_trigger": "string — single operational change causing ghosting"
         }
       },
-      "deal_breakers": ["string — concrete hard no's for THIS segment that would stop them applying or accepting (e.g. 'pay below market', 'no remote flexibility', 'unclear shift schedule', 'no company vehicle', 'too much travel', 'no promotion path'). 3-5 items, specific to this pool and the JD."],
+      "deal_breakers": ["string — from the CANDIDATE'S perspective: what about THIS role would make THIS specific segment decline or not apply (their walk-away triggers), e.g. a remote-first agency lead: 'mandatory 5-day on-site'; a senior pro: 'no real brand ownership / too junior a title'; a gig worker: 'pay below their current app'. These are the candidate's objections, NOT the employer's requirements, and MUST differ meaningfully across personas. 3-5 items."],
       "candidate_journey": {
         "discovery_risk": "string — why this segment may never SEE the role (wrong channels, weak title)",
         "click_risk": "string — why they may ignore the ad even if they see it",
