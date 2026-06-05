@@ -258,6 +258,17 @@ CEREBRAS_KEY    = os.environ.get("CEREBRAS_API_KEY", "")
 OPENROUTER_KEY  = os.environ.get("OPENROUTER_API_KEY", "")
 # GitHub Models accepts a GitHub PAT; allow either env name.
 GITHUB_MODELS_KEY = os.environ.get("GITHUB_MODELS_TOKEN") or os.environ.get("GITHUB_TOKEN", "")
+# Additional LLM providers (extra API keys)
+OPENAI_KEY      = os.environ.get("OPENAI_API_KEY", "")
+ANTHROPIC_KEY   = os.environ.get("ANTHROPIC_API_KEY", "")
+MISTRAL_KEY     = os.environ.get("MISTRAL_API_KEY", "")
+TOGETHER_KEY    = os.environ.get("TOGETHER_API_KEY", "")
+XAI_KEY         = os.environ.get("XAI_API_KEY", "")
+NVIDIA_KEY      = os.environ.get("NVIDIA_NIM_API_KEY", "")
+SAMBANOVA_KEY   = os.environ.get("SAMBANOVA_API_KEY", "")
+COHERE_KEY      = os.environ.get("COHERE_API_KEY") or os.environ.get("COHERSE_API_KEY", "")
+ZHIPU_KEY       = os.environ.get("ZHIPU_API_KEY", "")
+SILICONFLOW_KEY = os.environ.get("SILICONFLOW_API_KEY", "")
 
 # LLM output ceiling. Default 8000 fits gemini-2.0-flash's 8192 cap. To allow
 # fuller 6-persona maps, set GEMINI_MODEL=gemini-2.5-flash and LLM_MAX_TOKENS=16000.
@@ -1142,6 +1153,40 @@ def _call_github(prompt: str) -> str:
     )
 
 
+def _call_anthropic(prompt: str) -> str:
+    """Anthropic Claude via the Messages API (not OpenAI-compatible)."""
+    resp = requests.post(
+        "https://api.anthropic.com/v1/messages",
+        headers={"x-api-key": ANTHROPIC_KEY, "anthropic-version": "2023-06-01", "Content-Type": "application/json"},
+        json={
+            "model": os.environ.get("ANTHROPIC_MODEL", "claude-3-5-haiku-latest"),
+            "max_tokens": LLM_MAX_TOKENS, "temperature": 0.7,
+            "messages": [{"role": "user", "content": prompt}],
+        },
+        timeout=60,
+    )
+    resp.raise_for_status()
+    return resp.json()["content"][0]["text"]
+
+
+# Additional OpenAI-compatible providers (name, key, url, model-env, default-model).
+_EXTRA_OAI = [
+    ("openai",      OPENAI_KEY,      "https://api.openai.com/v1/chat/completions",              "OPENAI_MODEL",      "gpt-4o-mini"),
+    ("mistral",     MISTRAL_KEY,     "https://api.mistral.ai/v1/chat/completions",              "MISTRAL_MODEL",     "mistral-large-latest"),
+    ("together",    TOGETHER_KEY,    "https://api.together.xyz/v1/chat/completions",            "TOGETHER_MODEL",    "meta-llama/Llama-3.3-70B-Instruct-Turbo"),
+    ("xai",         XAI_KEY,         "https://api.x.ai/v1/chat/completions",                    "XAI_MODEL",         "grok-2-latest"),
+    ("nvidia",      NVIDIA_KEY,      "https://integrate.api.nvidia.com/v1/chat/completions",    "NVIDIA_MODEL",      "meta/llama-3.3-70b-instruct"),
+    ("sambanova",   SAMBANOVA_KEY,   "https://api.sambanova.ai/v1/chat/completions",            "SAMBANOVA_MODEL",   "Meta-Llama-3.3-70B-Instruct"),
+    ("cohere",      COHERE_KEY,      "https://api.cohere.ai/compatibility/v1/chat/completions", "COHERE_MODEL",      "command-r-plus"),
+    ("zhipu",       ZHIPU_KEY,       "https://open.bigmodel.cn/api/paas/v4/chat/completions",   "ZHIPU_MODEL",       "glm-4-flash"),
+    ("siliconflow", SILICONFLOW_KEY, "https://api.siliconflow.cn/v1/chat/completions",          "SILICONFLOW_MODEL", "Qwen/Qwen2.5-72B-Instruct"),
+]
+
+
+def _make_oai_caller(url, key, model):
+    return lambda prompt: _call_openai_compatible(url, key, model, prompt)
+
+
 def _call_llm(prompt: str) -> str:
     """Multi-provider fallback chain, with graceful handling of upstream rate limits.
 
@@ -1164,6 +1209,11 @@ def _call_llm(prompt: str) -> str:
         providers.append(("openrouter", _call_openrouter))
     if GITHUB_MODELS_KEY:
         providers.append(("github", _call_github))
+    if ANTHROPIC_KEY:
+        providers.append(("anthropic", _call_anthropic))
+    for _name, _key, _url, _menv, _mdef in _EXTRA_OAI:
+        if _key:
+            providers.append((_name, _make_oai_caller(_url, _key, os.environ.get(_menv, _mdef))))
 
     if not providers:
         raise RuntimeError(
