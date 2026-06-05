@@ -662,13 +662,13 @@ function Banner({ data }) {
           )}
           {local_context.posted_compensation ? (
             <span style={{ ...S.localCtxChip, background: "#ecfdf5", borderColor: "#a7f3d0" }}>
-              <span style={{ ...S.localCtxKey, color: "#047857" }}>Posted comp: </span>
+              <span style={{ ...S.localCtxKey, color: "#047857" }}>Target salary: </span>
               {local_context.posted_compensation}
             </span>
           ) : (
             <span style={{ ...S.localCtxChip, color: "#94a3b8" }}>
-              <span style={S.localCtxKey}>Posted comp: </span>
-              Not disclosed
+              <span style={S.localCtxKey}>Target salary: </span>
+              Not mentioned
             </span>
           )}
           {local_context.cost_of_living_index && (
