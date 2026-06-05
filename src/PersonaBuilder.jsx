@@ -643,7 +643,7 @@ function AxisGrid({ diversityScoring }) {
 }
 
 function Banner({ data }) {
-  const { role_summary, recruiter_brief, local_context, diversity_scoring } = data;
+  const { role_summary, recruiter_brief, local_context, diversity_scoring, market_salary } = data;
   const totalScore = diversity_scoring?.total_score ?? 0;
   const personaCount = diversity_scoring?.target_persona_count ?? 0;
   const bridgeIncluded = diversity_scoring?.bridge_persona_included;
@@ -686,6 +686,60 @@ function Banner({ data }) {
           )}
         </div>
       )}
+
+      {market_salary && market_salary.average != null && (() => {
+        const sym = market_salary.currency_symbol || "";
+        const code = market_salary.currency_code ? ` ${market_salary.currency_code}` : "";
+        const fmt = (n) => (n == null ? null : `${sym}${Number(n).toLocaleString()}`);
+        const avg = fmt(market_salary.average);
+        const lo = fmt(market_salary.low);
+        const hi = fmt(market_salary.high);
+        const range = lo && hi ? `${lo}–${hi}` : avg;
+        const cnt = market_salary.posting_count;
+        return (
+          <div
+            style={{
+              marginTop: 10,
+              padding: "10px 14px",
+              background: "#eff6ff",
+              border: "1px solid #bfdbfe",
+              borderRadius: 10,
+              display: "flex",
+              flexWrap: "wrap",
+              alignItems: "baseline",
+              gap: 8,
+            }}
+          >
+            <span style={{ fontSize: 13, fontWeight: 700, color: "#1d4ed8" }}>
+              💵 Market Salary Range
+            </span>
+            <span style={{ fontSize: 15, fontWeight: 700, color: "#0f172a" }}>
+              {range}{code}
+            </span>
+            {avg && lo && hi && (
+              <span style={{ fontSize: 12, color: "#475569" }}>(avg {avg})</span>
+            )}
+            <span style={{ fontSize: 12, color: "#64748b" }}>
+              · {market_salary.basis}
+            </span>
+            <span
+              style={{
+                fontSize: 11,
+                fontWeight: 600,
+                color: "#1d4ed8",
+                background: "#dbeafe",
+                borderRadius: 6,
+                padding: "2px 7px",
+              }}
+            >
+              {market_salary.source}{cnt ? ` · ${cnt} live postings` : ""} · {market_salary.confidence} confidence
+            </span>
+            <span style={{ flexBasis: "100%", fontSize: 11, color: "#94a3b8", marginTop: 2 }}>
+              Market value for this role in this city — not the salary in this posting.
+            </span>
+          </div>
+        );
+      })()}
 
       {diversity_scoring && (
         <>
