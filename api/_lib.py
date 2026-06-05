@@ -571,13 +571,26 @@ def _adzuna_country(market: str, blob: str) -> str:
     return ""
 
 
+_LAST_ADZUNA_DIAG = {}  # TEMP DEBUG: records why the last Adzuna call did/didn't fire
+
 def _enrich_salary(title: str, location: str, market: str, content: str) -> dict:
     """Real salary benchmark from Adzuna for THIS title × location. Global coverage.
     Returns {} unless ENABLE_DATA_ENRICHMENT and Adzuna keys are set."""
+    global _LAST_ADZUNA_DIAG
+    _LAST_ADZUNA_DIAG = {
+        "enrichment_enabled": bool(ENABLE_ENRICHMENT),
+        "app_id_present": bool(ADZUNA_APP_ID),
+        "app_key_present": bool(ADZUNA_APP_KEY),
+        "title": title or "",
+        "market": market or "",
+    }
     if not (ENABLE_ENRICHMENT and ADZUNA_APP_ID and ADZUNA_APP_KEY and title):
+        _LAST_ADZUNA_DIAG["reason"] = "gated_off (enrichment flag, missing app_id/app_key, or empty title)"
         return {}
     cc = _adzuna_country(market, f"{location}\n{content[:1500]}")
+    _LAST_ADZUNA_DIAG["country_code"] = cc
     if not cc:
+        _LAST_ADZUNA_DIAG["reason"] = f"no_adzuna_country_for_market ({market})"
         return {}
     try:
         params = {
@@ -589,19 +602,25 @@ def _enrich_salary(title: str, location: str, market: str, content: str) -> dict
         r = requests.get(
             f"https://api.adzuna.com/v1/api/jobs/{cc}/search/1", params=params, timeout=TIMEOUT
         )
+        _LAST_ADZUNA_DIAG["http_status"] = r.status_code
         if r.status_code != 200:
+            _LAST_ADZUNA_DIAG["reason"] = f"http_{r.status_code} (likely bad credentials if 401/403)"
             return {}
         d = r.json()
         mean = d.get("mean")
+        _LAST_ADZUNA_DIAG["count"] = d.get("count", 0)
         if not mean:
+            _LAST_ADZUNA_DIAG["reason"] = "no_mean_in_response (no salary data for this title×location)"
             return {}
         sals = [x.get("salary_min") for x in d.get("results", []) if x.get("salary_min")]
         sals += [x.get("salary_max") for x in d.get("results", []) if x.get("salary_max")]
         out = {"source": "Adzuna", "country": cc.upper(), "mean": round(mean), "count": d.get("count", 0)}
         if sals:
             out["low"], out["high"] = round(min(sals)), round(max(sals))
+        _LAST_ADZUNA_DIAG["reason"] = "ok"
         return out
-    except Exception:
+    except Exception as e:
+        _LAST_ADZUNA_DIAG["reason"] = f"exception: {type(e).__name__}"
         return {}
 
 
@@ -1761,6 +1780,7 @@ def build_persona_response(text: str = "", url: str = "", source: str = "job_des
     # Stage 4b: real grounding (only if enrichment enabled) — Adzuna salary (global) + FRED income (US)
     salary_data = _enrich_salary(signals.get("title", ""), signals.get("location", ""), market, jd_content)
     result["_pipeline"]["adzuna"] = salary_data
+    _adzuna_diag = dict(_LAST_ADZUNA_DIAG)  # TEMP DEBUG snapshot
     income_data = _enrich_income(market)
     result["_pipeline"]["fred"] = income_data
 
@@ -1841,4 +1861,7 @@ def build_persona_response(text: str = "", url: str = "", source: str = "job_des
         return data
 
     # Production: strip every internal/debug field so nothing leaks to the browser.
-    return {k: v for k, v in data.items() if not k.startswith("_")}
+    out = {k: v for k, v in data.items() if not k.startswith("_")}
+    # TEMP DEBUG: surface why Adzuna did/didn't fire (no secret values — booleans + reason only).
+    out["enrichment_diag"] = _adzuna_diag
+    return out
