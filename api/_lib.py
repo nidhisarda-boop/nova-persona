@@ -284,6 +284,7 @@ SILICONFLOW_KEY = os.environ.get("SILICONFLOW_API_KEY", "")
 ENABLE_ENRICHMENT = os.environ.get("ENABLE_DATA_ENRICHMENT", "").lower() in ("1", "true", "yes", "on")
 ADZUNA_APP_ID  = os.environ.get("ADZUNA_APP_ID", "")
 ADZUNA_APP_KEY = os.environ.get("ADZUNA_APP_KEY", "")
+FRED_KEY       = os.environ.get("FRED_API_KEY", "")
 
 # LLM output ceiling. Default 8000 fits gemini-2.0-flash's 8192 cap. To allow
 # fuller 6-persona maps, set GEMINI_MODEL=gemini-2.5-flash and LLM_MAX_TOKENS=16000.
@@ -600,6 +601,30 @@ def _enrich_salary(title: str, location: str, market: str, content: str) -> dict
         if sals:
             out["low"], out["high"] = round(min(sals)), round(max(sals))
         return out
+    except Exception:
+        return {}
+
+
+def _enrich_income(market: str) -> dict:
+    """Real US median household income from FRED (anchors the income tiers).
+    US-only for now; returns {} unless enrichment + FRED key are set."""
+    if not (ENABLE_ENRICHMENT and FRED_KEY and market == "US"):
+        return {}
+    try:
+        r = requests.get(
+            "https://api.stlouisfed.org/fred/series/observations",
+            params={"series_id": "MEHOINUSA672N", "api_key": FRED_KEY,
+                    "file_type": "json", "sort_order": "desc", "limit": 1},
+            timeout=TIMEOUT,
+        )
+        if r.status_code != 200:
+            return {}
+        obs = (r.json().get("observations") or [{}])[0]
+        val = obs.get("value")
+        if not val or val == ".":
+            return {}
+        return {"source": "FRED", "us_median_household_income": round(float(val)),
+                "year": (obs.get("date") or "")[:4]}
     except Exception:
         return {}
 
@@ -1005,7 +1030,8 @@ def _market_from_url(url: str) -> str:
 
 
 def _build_prompt(jd_text: str, signals: dict, onet: dict, wages: dict, demos: str,
-                  fallback: bool, market: str = "Global", salary_data: dict = None) -> str:
+                  fallback: bool, market: str = "Global", salary_data: dict = None,
+                  income_data: dict = None) -> str:
     parts = [SYSTEM_PROMPT, "\n\n=== INPUT DATA ==="]
 
     if market == "Global":
@@ -1061,6 +1087,12 @@ def _build_prompt(jd_text: str, signals: dict, onet: dict, wages: dict, demos: s
             f"and cite as 'Adzuna market data'): average {salary_data['mean']:,}{rng} "
             f"across {salary_data.get('count','many')} live postings. Use this to ground "
             f"target_monthly_income and household income; you MAY name Adzuna as the source."
+        )
+    if income_data and income_data.get("us_median_household_income"):
+        parts.append(
+            f"\nFRED_INCOME (REAL US median household income, source FRED, {income_data.get('year','')}): "
+            f"${income_data['us_median_household_income']:,}. Use this as the anchor when assigning "
+            f"US household-income tiers; you MAY cite FRED as the source."
         )
     if demos:
         parts.append(f"\nMARKET_GROUNDING.demographic_signals:\n{demos}")
@@ -1726,16 +1758,18 @@ def build_persona_response(text: str = "", url: str = "", source: str = "job_des
     wages = _careeronestop_wages(signals.get("title", ""), signals.get("location", "")) if market == "US" else {}
     result["_pipeline"]["wages"] = wages
 
-    # Stage 4b: Adzuna real salary grounding (global — only if enrichment enabled)
+    # Stage 4b: real grounding (only if enrichment enabled) — Adzuna salary (global) + FRED income (US)
     salary_data = _enrich_salary(signals.get("title", ""), signals.get("location", ""), market, jd_content)
     result["_pipeline"]["adzuna"] = salary_data
+    income_data = _enrich_income(market)
+    result["_pipeline"]["fred"] = income_data
 
     # Stage 5: Tavily demographics
     demos = _tavily_demographics(signals.get("title", ""), signals.get("location", ""))
     result["_pipeline"]["tavily_chars"] = len(demos)
 
     # Stage 6: Build prompt and call LLM
-    prompt = _build_prompt(jd_content, signals, onet, wages, demos, fallback, market, salary_data)
+    prompt = _build_prompt(jd_content, signals, onet, wages, demos, fallback, market, salary_data, income_data)
     raw = _call_llm(prompt)
 
     # Stage 7: Parse, validate, and normalize
