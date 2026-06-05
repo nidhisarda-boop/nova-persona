@@ -1081,7 +1081,7 @@ function PersonaCard({ persona, index, locked, onToggleLock }) {
             )}
             {financials?.target_monthly_income_from_role && (
               <div style={S.infoCell}>
-                <div style={S.infoCellKey}>Target Monthly</div>
+                <div style={S.infoCellKey}>Expected Monthly</div>
                 <div style={S.infoCellVal}>{financials.target_monthly_income_from_role}</div>
               </div>
             )}
