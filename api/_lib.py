@@ -280,6 +280,11 @@ COHERE_KEY      = os.environ.get("COHERE_API_KEY") or os.environ.get("COHERSE_AP
 ZHIPU_KEY       = os.environ.get("ZHIPU_API_KEY", "")
 SILICONFLOW_KEY = os.environ.get("SILICONFLOW_API_KEY", "")
 
+# Data enrichment (real salary grounding via Adzuna — global coverage).
+ENABLE_ENRICHMENT = os.environ.get("ENABLE_DATA_ENRICHMENT", "").lower() in ("1", "true", "yes", "on")
+ADZUNA_APP_ID  = os.environ.get("ADZUNA_APP_ID", "")
+ADZUNA_APP_KEY = os.environ.get("ADZUNA_APP_KEY", "")
+
 # LLM output ceiling. Default 8000 fits gemini-2.0-flash's 8192 cap. To allow
 # fuller 6-persona maps, set GEMINI_MODEL=gemini-2.5-flash and LLM_MAX_TOKENS=16000.
 GEMINI_MODEL   = os.environ.get("GEMINI_MODEL", "gemini-2.0-flash")
@@ -539,6 +544,66 @@ def _careeronestop_wages(title: str, location: str) -> dict:
         return {}
 
 
+# ── Stage 3b: Adzuna real salary grounding (GLOBAL — US/UK/India/EU/CA/AU) ──
+
+_ADZUNA_COUNTRIES = {"US": "us", "UK": "gb", "India": "in", "Canada": "ca", "Australia": "au"}
+_ADZUNA_EU = [
+    (r"netherland|nederland|amsterdam|rotterdam|the hague|utrecht|eindhoven", "nl"),
+    (r"german|deutschland|berlin|munich|frankfurt|hamburg", "de"),
+    (r"\bfrance\b|paris|lyon|marseille", "fr"),
+    (r"\bspain\b|madrid|barcelona|valencia", "es"),
+    (r"\bitaly\b|milan|rome|turin", "it"),
+    (r"belgium|brussels|antwerp", "be"),
+    (r"poland|warsaw|krakow", "pl"),
+    (r"austria|vienna", "at"),
+]
+
+
+def _adzuna_country(market: str, blob: str) -> str:
+    """Map a detected market (and content) to an Adzuna country code, or ''."""
+    if market in _ADZUNA_COUNTRIES:
+        return _ADZUNA_COUNTRIES[market]
+    if market == "EU":
+        for pat, cc in _ADZUNA_EU:
+            if re.search(pat, blob, re.IGNORECASE):
+                return cc
+    return ""
+
+
+def _enrich_salary(title: str, location: str, market: str, content: str) -> dict:
+    """Real salary benchmark from Adzuna for THIS title × location. Global coverage.
+    Returns {} unless ENABLE_DATA_ENRICHMENT and Adzuna keys are set."""
+    if not (ENABLE_ENRICHMENT and ADZUNA_APP_ID and ADZUNA_APP_KEY and title):
+        return {}
+    cc = _adzuna_country(market, f"{location}\n{content[:1500]}")
+    if not cc:
+        return {}
+    try:
+        params = {
+            "app_id": ADZUNA_APP_ID, "app_key": ADZUNA_APP_KEY,
+            "what": title, "results_per_page": 30, "content-type": "application/json",
+        }
+        if location:
+            params["where"] = location
+        r = requests.get(
+            f"https://api.adzuna.com/v1/api/jobs/{cc}/search/1", params=params, timeout=TIMEOUT
+        )
+        if r.status_code != 200:
+            return {}
+        d = r.json()
+        mean = d.get("mean")
+        if not mean:
+            return {}
+        sals = [x.get("salary_min") for x in d.get("results", []) if x.get("salary_min")]
+        sals += [x.get("salary_max") for x in d.get("results", []) if x.get("salary_max")]
+        out = {"source": "Adzuna", "country": cc.upper(), "mean": round(mean), "count": d.get("count", 0)}
+        if sals:
+            out["low"], out["high"] = round(min(sals)), round(max(sals))
+        return out
+    except Exception:
+        return {}
+
+
 # ── Stage 4: Tavily demographic research ──────────────────────────────────
 
 def _tavily_demographics(title: str, location: str) -> str:
@@ -688,7 +753,7 @@ Every persona MUST map to talent pools that fit this operating center as defined
 CRITICAL RULES FOR PERSONA GENERATION:
 - EVIDENCE INTEGRITY: evidence_basis, notes, and confidence fields may ONLY cite a source whose data was actually supplied in INPUT DATA (STRUCTURED_JD, ONET_GROUNDING, MARKET_GROUNDING). NEVER invent source names such as "LinkedIn postings", "Glassdoor salary data", "Indeed insights", or "alumni placement data".
 - STRUCTURED_JD fields COUNT AS SOURCED. When salary or location came from STRUCTURED_JD, treat them as grounded: evidence_basis should say "Sourced from the job posting", salary/location are High confidence, and sourced_vs_inferred must state which facts came from the JD vs were inferred. Only when neither the JD nor an external source provided salary/location do you write "Inferred from JD requirements; external salary source not used" and keep overall_score ≤ 65.
-- NO NAMED SALARY SOURCES: never attribute an inferred salary/income figure to a specific website, report, or dataset you were not given (e.g. "SalaryExpert", "Payscale", "Glassdoor", "BLS", "ZipRecruiter salary data"). If a figure is inferred, write exactly "inferred from US labor-market norms" — naming a source you did not receive is fabrication.
+- NO NAMED SALARY SOURCES: never attribute an inferred salary/income figure to a specific website, report, or dataset you were not given (e.g. "SalaryExpert", "Payscale", "Glassdoor", "BLS", "ZipRecruiter salary data"). If a figure is inferred, write exactly "inferred from US labor-market norms" — naming a source you did not receive is fabrication. EXCEPTION: if ADZUNA_SALARY data is present in INPUT DATA, it WAS actually queried for this role — you MUST use it to ground compensation, cite it as "Adzuna market data", and mark salary as SOURCED / High confidence.
 - Personas MUST be labor-market segments (real candidate pools with distinct backgrounds and paths to this role), NOT personality archetypes ("The Results Driver", "The Relationship Builder")
 - Each persona's archetype AND name must name a SOURCEABLE prior-background talent pool — a real group you could filter for on LinkedIn/Naukri by their last role, industry, or employer type (e.g. "Agency Campaign Operator", "CPG Brand Marketer", "Media-Agency Social Lead", "The Ad Ops Operator", "The SaaS CS Migrant")
 - BANNED as an archetype or name: functional skills or personality traits that EVERY candidate for this role would share — e.g. "Data-Driven", "Creative", "Storyteller", "Data-Driven Brand Builder", "Creative Storyteller", "Strategic Thinker", "Results-Driven", "Innovative". These are not distinct candidate pools and cannot be sourced. Litmus test: if you cannot rephrase the archetype as "their last role was X" or "they come from Y industry", it is INVALID — fix it before returning.
@@ -940,7 +1005,7 @@ def _market_from_url(url: str) -> str:
 
 
 def _build_prompt(jd_text: str, signals: dict, onet: dict, wages: dict, demos: str,
-                  fallback: bool, market: str = "Global") -> str:
+                  fallback: bool, market: str = "Global", salary_data: dict = None) -> str:
     parts = [SYSTEM_PROMPT, "\n\n=== INPUT DATA ==="]
 
     if market == "Global":
@@ -985,6 +1050,17 @@ def _build_prompt(jd_text: str, signals: dict, onet: dict, wages: dict, demos: s
         parts.append(
             f"\nMARKET_GROUNDING.salary_bounds (SECONDARY benchmark only — a US national "
             f"aggregate; if the JD states its own salary/location, prefer the JD): {salary_str}"
+        )
+    if salary_data and salary_data.get("mean"):
+        rng = ""
+        if salary_data.get("low") and salary_data.get("high"):
+            rng = f", typical range {salary_data['low']:,}–{salary_data['high']:,}"
+        parts.append(
+            f"\nADZUNA_SALARY (REAL external benchmark — actually queried for this title × "
+            f"location in {salary_data.get('country','')}; treat as SOURCED and HIGH confidence, "
+            f"and cite as 'Adzuna market data'): average {salary_data['mean']:,}{rng} "
+            f"across {salary_data.get('count','many')} live postings. Use this to ground "
+            f"target_monthly_income and household income; you MAY name Adzuna as the source."
         )
     if demos:
         parts.append(f"\nMARKET_GROUNDING.demographic_signals:\n{demos}")
@@ -1650,12 +1726,16 @@ def build_persona_response(text: str = "", url: str = "", source: str = "job_des
     wages = _careeronestop_wages(signals.get("title", ""), signals.get("location", "")) if market == "US" else {}
     result["_pipeline"]["wages"] = wages
 
+    # Stage 4b: Adzuna real salary grounding (global — only if enrichment enabled)
+    salary_data = _enrich_salary(signals.get("title", ""), signals.get("location", ""), market, jd_content)
+    result["_pipeline"]["adzuna"] = salary_data
+
     # Stage 5: Tavily demographics
     demos = _tavily_demographics(signals.get("title", ""), signals.get("location", ""))
     result["_pipeline"]["tavily_chars"] = len(demos)
 
     # Stage 6: Build prompt and call LLM
-    prompt = _build_prompt(jd_content, signals, onet, wages, demos, fallback, market)
+    prompt = _build_prompt(jd_content, signals, onet, wages, demos, fallback, market, salary_data)
     raw = _call_llm(prompt)
 
     # Stage 7: Parse, validate, and normalize
