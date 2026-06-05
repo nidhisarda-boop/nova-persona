@@ -660,10 +660,15 @@ function Banner({ data }) {
               {local_context.metro_area}
             </span>
           )}
-          {local_context.posted_compensation && (
+          {local_context.posted_compensation ? (
             <span style={{ ...S.localCtxChip, background: "#ecfdf5", borderColor: "#a7f3d0" }}>
               <span style={{ ...S.localCtxKey, color: "#047857" }}>Posted comp: </span>
               {local_context.posted_compensation}
+            </span>
+          ) : (
+            <span style={{ ...S.localCtxChip, color: "#94a3b8" }}>
+              <span style={S.localCtxKey}>Posted comp: </span>
+              Not disclosed
             </span>
           )}
           {local_context.cost_of_living_index && (
@@ -732,7 +737,7 @@ function Banner({ data }) {
                 padding: "2px 7px",
               }}
             >
-              {market_salary.source}{cnt ? ` · ${cnt} live postings` : ""} · {market_salary.confidence} confidence
+              {market_salary.source}{cnt ? ` · ${cnt} live postings` : ""} · {market_salary.confidence}
             </span>
             <span style={{ flexBasis: "100%", fontSize: 11, color: "#94a3b8", marginTop: 2 }}>
               Market value for this role in this city — not the salary in this posting.

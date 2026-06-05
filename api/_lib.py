@@ -1792,7 +1792,15 @@ def build_persona_response(text: str = "", url: str = "", source: str = "job_des
     # reliable and always carries the real source label. Only attached when the
     # Adzuna call actually returned numbers; otherwise the field is absent and the
     # UI shows nothing (we never fabricate a market range).
-    if salary_data and salary_data.get("mean"):
+    _ms_count = (salary_data or {}).get("count") or 0
+    if salary_data and salary_data.get("mean") and _ms_count >= 1:
+        # Confidence scales with how many live postings backed the benchmark.
+        if _ms_count >= 50:
+            _ms_conf = "High confidence"
+        elif _ms_count >= 15:
+            _ms_conf = "Medium confidence"
+        else:
+            _ms_conf = "Directional market signal"
         _CUR = {"US": ("$", "USD"), "GB": ("£", "GBP"), "IN": ("₹", "INR"),
                 "CA": ("C$", "CAD"), "AU": ("A$", "AUD"), "NL": ("€", "EUR"),
                 "DE": ("€", "EUR"), "FR": ("€", "EUR"), "ES": ("€", "EUR"),
@@ -1814,7 +1822,7 @@ def build_persona_response(text: str = "", url: str = "", source: str = "job_des
             "basis": f"{title_lbl} × {loc_lbl}",
             "posting_count": salary_data.get("count"),
             "source": "Adzuna market data",
-            "confidence": "High",
+            "confidence": _ms_conf,
             "note": "Typical market value for this title in this city, averaged across live job postings. Not the salary in this posting (which did not state one).",
         }
 
