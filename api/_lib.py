@@ -592,6 +592,61 @@ def _title_from_summary(summary: str) -> str:
     return title
 
 
+_US_STATE_ABBR = {
+    "AL": "Alabama", "AK": "Alaska", "AZ": "Arizona", "AR": "Arkansas",
+    "CA": "California", "CO": "Colorado", "CT": "Connecticut", "DE": "Delaware",
+    "FL": "Florida", "GA": "Georgia", "HI": "Hawaii", "ID": "Idaho",
+    "IL": "Illinois", "IN": "Indiana", "IA": "Iowa", "KS": "Kansas",
+    "KY": "Kentucky", "LA": "Louisiana", "ME": "Maine", "MD": "Maryland",
+    "MA": "Massachusetts", "MI": "Michigan", "MN": "Minnesota", "MS": "Mississippi",
+    "MO": "Missouri", "MT": "Montana", "NE": "Nebraska", "NV": "Nevada",
+    "NH": "New Hampshire", "NJ": "New Jersey", "NM": "New Mexico", "NY": "New York",
+    "NC": "North Carolina", "ND": "North Dakota", "OH": "Ohio", "OK": "Oklahoma",
+    "OR": "Oregon", "PA": "Pennsylvania", "RI": "Rhode Island", "SC": "South Carolina",
+    "SD": "South Dakota", "TN": "Tennessee", "TX": "Texas", "UT": "Utah",
+    "VT": "Vermont", "VA": "Virginia", "WA": "Washington", "WV": "West Virginia",
+    "WI": "Wisconsin", "WY": "Wyoming", "DC": "District of Columbia",
+}
+
+# Major US cities -> state (covers the metros in _MARKET_SIGNALS["US"])
+_US_CITY_STATE = {
+    "san antonio": "Texas", "dallas": "Texas", "houston": "Texas", "fort worth": "Texas",
+    "austin": "Texas", "el paso": "Texas", "phoenix": "Arizona", "tucson": "Arizona",
+    "los angeles": "California", "san francisco": "California", "san diego": "California",
+    "san jose": "California", "fresno": "California", "sacramento": "California",
+    "san bernardino": "California", "new york": "New York", "chicago": "Illinois",
+    "seattle": "Washington", "boston": "Massachusetts", "philadelphia": "Pennsylvania",
+    "pittsburgh": "Pennsylvania", "jacksonville": "Florida", "miami": "Florida",
+    "tampa": "Florida", "orlando": "Florida", "columbus": "Ohio", "cleveland": "Ohio",
+    "cincinnati": "Ohio", "charlotte": "North Carolina", "raleigh": "North Carolina",
+    "indianapolis": "Indiana", "denver": "Colorado", "nashville": "Tennessee",
+    "memphis": "Tennessee", "oklahoma city": "Oklahoma", "las vegas": "Nevada",
+    "detroit": "Michigan", "portland": "Oregon", "atlanta": "Georgia",
+    "baltimore": "Maryland", "milwaukee": "Wisconsin", "albuquerque": "New Mexico",
+    "kansas city": "Missouri", "omaha": "Nebraska", "st louis": "Missouri",
+    "st. louis": "Missouri", "minneapolis": "Minnesota", "new orleans": "Louisiana",
+    "salt lake city": "Utah", "washington": "District of Columbia",
+}
+
+
+def _us_state_for(location: str, content: str) -> str:
+    """Resolve a US state name from the location string or JD content, for an
+    Adzuna state-level fallback. Returns '' if none found."""
+    loc = location or ""
+    blob = f"{loc}\n{(content or '')[:1500]}"
+    # "City, TX" abbreviation (prefer the location field)
+    m = re.search(r",\s*([A-Z]{2})\b", loc) or re.search(r",\s*([A-Z]{2})\b", blob)
+    if m and m.group(1) in _US_STATE_ABBR:
+        return _US_STATE_ABBR[m.group(1)]
+    # Full state name anywhere in the blob
+    for st in _US_STATE_ABBR.values():
+        if re.search(rf"\b{re.escape(st)}\b", blob, re.IGNORECASE):
+            return st
+    # City lookup
+    key = loc.strip().lower().split(",")[0].strip()
+    return _US_CITY_STATE.get(key, "")
+
+
 _LAST_ADZUNA_DIAG = {}  # TEMP DEBUG: records why the last Adzuna call did/didn't fire
 
 def _enrich_salary(title: str, location: str, market: str, content: str) -> dict:
@@ -614,12 +669,16 @@ def _enrich_salary(title: str, location: str, market: str, content: str) -> dict
         _LAST_ADZUNA_DIAG["reason"] = f"no_adzuna_country_for_market ({market})"
         return {}
 
-    # Attempt chain — narrow to broad. City salary coverage is patchy on Adzuna,
-    # so if the title × city query has no salaried postings, fall back to a
-    # national title benchmark (still real, sourced data — just country-level).
+    # Attempt chain — narrow to broad: city -> state -> national. Adzuna's
+    # city-level salary coverage is patchy, so we widen the geography step by
+    # step rather than jumping straight to the country average.
     attempts = []
     if location:
         attempts.append((location, "city"))
+    if cc == "us":
+        state = _us_state_for(location, content)
+        if state and state.lower() != (location or "").strip().lower():
+            attempts.append((state, "state"))
     attempts.append((None, "national"))
 
     last_reason = "no_mean_in_response (no salary data for this title×location)"
@@ -650,7 +709,7 @@ def _enrich_salary(title: str, location: str, market: str, content: str) -> dict
             sals = [x.get("salary_min") for x in d.get("results", []) if x.get("salary_min")]
             sals += [x.get("salary_max") for x in d.get("results", []) if x.get("salary_max")]
             out = {"source": "Adzuna", "country": cc.upper(), "mean": round(mean),
-                   "count": d.get("count", 0), "geo": geo}
+                   "count": d.get("count", 0), "geo": geo, "geo_name": where or ""}
             if sals:
                 out["low"], out["high"] = round(min(sals)), round(max(sals))
             _LAST_ADZUNA_DIAG["reason"] = f"ok ({geo})"
@@ -1916,15 +1975,19 @@ def build_persona_response(text: str = "", url: str = "", source: str = "job_des
                     "AT": "Austria", "BE": "Belgium", "PL": "Poland"}
         cc = (salary_data.get("country") or "").upper()
         sym, code = _CUR.get(cc, ("", ""))
-        is_national = salary_data.get("geo") == "national"
+        geo = salary_data.get("geo")
         title_lbl = (resolved_title or "this role").strip()
         loc_lbl = (resolved_loc or "this market").strip()
-        if is_national:
+        if geo == "national":
             geo_lbl = f"{_CC_NAME.get(cc, cc)} (national)"
-            note = ("National market average for this title — no city-level salary data was "
+            note = ("National market average for this title — no city- or state-level salary data "
+                    "was available. Not the salary in this posting (which did not state one).")
+        elif geo == "state":
+            geo_lbl = f"{salary_data.get('geo_name') or 'state'} (statewide)"
+            note = ("Statewide market average for this title — no city-level salary data was "
                     "available for this location. Not the salary in this posting (which did not state one).")
         else:
-            geo_lbl = loc_lbl
+            geo_lbl = salary_data.get("geo_name") or loc_lbl
             note = ("Typical market value for this title in this city, averaged across live job "
                     "postings. Not the salary in this posting (which did not state one).")
         data["market_salary"] = {
