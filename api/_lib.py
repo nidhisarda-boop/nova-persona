@@ -263,6 +263,14 @@ CAREERONESTOP_USER  = os.environ.get("CAREERONESTOP_USER_ID", "")
 CAREERONESTOP_TOKEN = os.environ.get("CAREERONESTOP_TOKEN", "")
 TAVILY_KEY      = os.environ.get("TAVILY_API_KEY", "")
 GEMINI_KEY      = os.environ.get("GEMINI_API_KEY", "")
+# Extra Gemini keys (from SEPARATE Google projects = independent free quota).
+# Add GEMINI_API_KEY_2, _3, … to multiply free headroom before any paid fallback.
+GEMINI_KEYS = [k for k in [
+    GEMINI_KEY,
+    os.environ.get("GEMINI_API_KEY_2", ""),
+    os.environ.get("GEMINI_API_KEY_3", ""),
+    os.environ.get("GEMINI_API_KEY_4", ""),
+] if k]
 GROQ_KEY        = os.environ.get("GROQ_API_KEY", "")
 CEREBRAS_KEY    = os.environ.get("CEREBRAS_API_KEY", "")
 OPENROUTER_KEY  = os.environ.get("OPENROUTER_API_KEY", "")
@@ -1429,11 +1437,11 @@ def _build_prompt(jd_text: str, signals: dict, onet: dict, wages: dict, demos: s
 
 # ── Stage 5: LLM call (Gemini → Groq) ──────────────────────────────────────
 
-def _call_gemini(prompt: str, timeout: int = LLM_TIMEOUT) -> str:
+def _call_gemini(prompt: str, timeout: int = LLM_TIMEOUT, key: str = None) -> str:
     """Call Gemini Flash via OpenAI-compatible endpoint."""
     resp = requests.post(
         "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
-        headers={"Authorization": f"Bearer {GEMINI_KEY}", "Content-Type": "application/json"},
+        headers={"Authorization": f"Bearer {key or GEMINI_KEY}", "Content-Type": "application/json"},
         json={
             "model": GEMINI_MODEL,
             "messages": [{"role": "user", "content": prompt}],
@@ -1572,8 +1580,11 @@ def _call_llm(prompt: str) -> str:
     # Order = quality-first, with generous-free fallbacks behind it. Gemini leads
     # because it produces stronger sociological segmentation than gpt-oss-120b.
     providers = []
-    if GEMINI_KEY:
-        providers.append(("gemini", _call_gemini))
+    # One entry per Gemini key (each from a separate Google project = its own free
+    # quota). A 429 on one key falls through to the next key, then the next provider.
+    for _i, _gk in enumerate(GEMINI_KEYS):
+        _label = "gemini" if _i == 0 else f"gemini{_i + 1}"
+        providers.append((_label, lambda p, t, _k=_gk: _call_gemini(p, t, key=_k)))
     if CEREBRAS_KEY:
         providers.append(("cerebras", _call_cerebras))
     if GROQ_KEY:
