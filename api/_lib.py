@@ -297,8 +297,8 @@ FRED_KEY       = os.environ.get("FRED_API_KEY", "")
 
 # LLM output ceiling. Default 8000 fits gemini-2.0-flash's 8192 cap. To allow
 # fuller 6-persona maps, set GEMINI_MODEL=gemini-2.5-flash and LLM_MAX_TOKENS=16000.
-GEMINI_MODEL   = os.environ.get("GEMINI_MODEL", "gemini-2.0-flash")
-LLM_MAX_TOKENS = int(os.environ.get("LLM_MAX_TOKENS", "8000"))
+GEMINI_MODEL   = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")
+LLM_MAX_TOKENS = int(os.environ.get("LLM_MAX_TOKENS", "16000"))
 
 TIMEOUT = 20
 # Best-effort enrichment (Adzuna/FRED) must never blow the function time budget.
@@ -1928,6 +1928,26 @@ def _parse_money_range(s: str):
     return (min(vals), max(vals)) if len(vals) >= 2 else None
 
 
+def _drop_truncated_personas(data: dict) -> dict:
+    """Safety net: if the model output was truncated mid-persona (e.g. a provider's
+    output-token ceiling), the trailing persona has demographics/financials but no
+    later fields. Drop any persona missing BOTH its drivers/motivations AND evidence
+    blocks rather than render a half-empty card. Keeps at least one persona."""
+    personas = data.get("personas")
+    if not isinstance(personas, list) or len(personas) <= 1:
+        return data
+
+    def _complete(p):
+        if not isinstance(p, dict):
+            return False
+        return bool(p.get("drivers_and_friction")) or bool(p.get("evidence_confidence"))
+
+    kept = [p for p in personas if _complete(p)]
+    if kept and len(kept) < len(personas):
+        data["personas"] = kept
+    return data
+
+
 def _cap_hourly_household_income(data: dict) -> dict:
     """DETERMINISTIC backstop: for hourly/gig roles the LLM keeps inflating
     household income for income-dependent personas. Cap any over-high range down
@@ -2087,7 +2107,8 @@ def build_persona_response(text: str = "", url: str = "", source: str = "job_des
     # Stage 7: Parse, validate, and normalize
     data = _parse_json(raw)
     data = validate_output(data)      # schema + safety check before it leaves the server
-    data = _normalize_segments(data)
+    data = _drop_truncated_personas(data)  # never render a half-generated trailing persona
+    data = _normalize_segments(data)  # renormalizes % after any drop
     data = _enforce_persona_count(data)   # deterministic, preset-aware count cap
     data = _scrub_internal_tokens(data)   # strip any leaked internal variable names
 
