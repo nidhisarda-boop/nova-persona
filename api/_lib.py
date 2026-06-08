@@ -308,6 +308,10 @@ ENRICH_TIMEOUT = int(os.environ.get("ENRICH_TIMEOUT", "6"))
 # maxDuration (60s) so one slow provider can't consume the whole budget and get
 # the function killed before the fallback chain or our error JSON can return.
 LLM_TIMEOUT = int(os.environ.get("LLM_TIMEOUT", "60"))
+# Early/fast providers fail FAST (a hung one must not burn the budget); only the
+# FINAL last-resort provider (usually Claude, which is slower to generate a full
+# map) gets the generous remaining window.
+LLM_TIMEOUT_FAST = int(os.environ.get("LLM_TIMEOUT_FAST", "18"))
 # Hard wall-clock deadline for the whole request (seconds). Set at pipeline start;
 # the LLM loop stops starting new providers once we're within one LLM_TIMEOUT of it,
 # guaranteeing we return our own JSON (honest error) instead of a 504.
@@ -1608,13 +1612,15 @@ def _call_llm(prompt: str) -> str:
         )
 
     errors = []
-    for name, fn in providers:
-        # Give each provider up to LLM_TIMEOUT, but never more than the time left in
-        # the request budget (minus a small buffer to return our JSON). This lets the
-        # last-resort provider use whatever time remains instead of a fixed short cap,
-        # while still guaranteeing we return our own error, never a 504.
+    _last_idx = len(providers) - 1
+    for _idx, (name, fn) in enumerate(providers):
+        # Fail FAST on every provider except the final one — a hung early provider
+        # must not consume the budget. The FINAL last-resort provider (usually Claude)
+        # gets the big remaining window so it can actually finish a full map. Every
+        # call is still capped by the time left, so we always return our own JSON.
         remaining = (_REQUEST_DEADLINE - time.time()) if _REQUEST_DEADLINE else float(LLM_TIMEOUT)
-        call_timeout = int(min(LLM_TIMEOUT, remaining - 4))
+        cap = LLM_TIMEOUT if _idx == _last_idx else LLM_TIMEOUT_FAST
+        call_timeout = int(min(cap, remaining - 4))
         if call_timeout < 5:
             errors.append((name, requests.exceptions.Timeout("request budget exhausted")))
             print(f"[nova] stopping provider chain before {name}: request budget nearly exhausted")
