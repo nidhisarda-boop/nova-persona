@@ -723,7 +723,11 @@ def _enrich_salary(title: str, location: str, market: str, content: str) -> dict
             out = {"source": "Adzuna", "country": cc.upper(), "mean": round(mean),
                    "count": d.get("count", 0), "geo": geo, "geo_name": where or ""}
             if sals:
-                out["low"], out["high"] = round(min(sals)), round(max(sals))
+                lo, hi = round(min(sals)), round(max(sals))
+                # Adzuna's `mean` is the full-dataset average, but low/high come from
+                # the page-1 results sample, which may not bracket it. Clamp so the
+                # displayed range ALWAYS contains the average — never "avg > max".
+                out["low"], out["high"] = min(lo, out["mean"]), max(hi, out["mean"])
             _LAST_ADZUNA_DIAG["reason"] = f"ok ({geo})"
             return out
         except Exception as e:
@@ -990,6 +994,8 @@ CORPORATE / SENIOR BRIDGE (for corporate_professional and executive_specialist p
 
 STEP 4 — GENERATE PERSONAS WITH MAXIMUM VARIANCE
 Maximize variance across personas on the highest-scoring axes. Personas that are minor demographic variations of each other are INVALID. Each must represent a genuinely distinct segment with different motivations, financial context, and life stage.
+DISTINCTNESS TEST (apply to every pair of personas): two personas are DUPLICATES — and you MUST merge them or replace one — if they share the same LIFE STAGE + EXPERIENCE LEVEL + PRIMARY MOTIVATION, even under different names. "Food Service Enthusiast" and "Career Starter" are the SAME entry-level segment; "Career Changer" and "Bridge Worker" are usually the SAME segment. Names alone do not make personas distinct — the underlying pool must differ.
+FRONTLINE / HOURLY ROLES — pick from genuinely different LIFE-STAGE pools, not near-duplicate entry-level labels. A strong set draws from: (a) FIRST-JOB youth (16–20, no prior work history, wants a first stable paycheck); (b) STUDENT part-timer (needs shifts that flex around class); (c) EXPERIENCED QSR/retail worker switching FROM a named competitor (McDonald's, Taco Bell, Burger King) for better pay or schedule; (d) SECOND-JOB / working-parent income supporter (older, wants reliable predictable hours and weekly pay); (e) RE-ENTRY / career-changer (gap in work history, returning to the workforce). Choose the pools that fit THIS role and market; do NOT output two personas that are both "entry-level enthusiast/starter."
 
 Pew HH Income Tiers — US roles (calibrate to local COL):
 - Lower: <$35k — paycheck to paycheck, every dollar critical
@@ -1015,7 +1021,8 @@ GIG/CONTRACTOR ROLE SPECIAL RULES (apply when preset = gig_flexible or hourly_fr
    - "Unsure if vehicle qualifies" — needs vehicle requirements clarification first
    This MUST appear in at least one persona's onboarding friction or churn trigger.
 4. ANTI-REPETITION: The following MUST be DIFFERENT across all personas:
-   - primary_motivation (ban: using "flexibility and autonomy" for more than one persona)
+   - primary_motivation (ban: using "flexibility and autonomy" for more than one persona; also do NOT reuse "job security" or "career advancement" as the primary for more than one)
+   - pain_points (the friction/frustration list cannot be the same set — e.g. "poor work-life balance, limited opportunities" — repeated across personas)
    - sourcing_channel.primary (no two personas can share the same primary channel)
    - conversion_hook.headline (every headline must be genuinely different)
    - churn_trigger (cannot be the same payment/income issue for every persona)
@@ -1026,6 +1033,7 @@ SELF-VALIDATION — Before returning output, check all of these. If any fail, re
 ✗ REJECT if all personas share the same age range
 ✗ REJECT if all personas share the same sourcing channel
 ✗ REJECT if any persona is an entry-level / crew / trainee / "aspirant" pool for a role that manages people, owns a P&L/location, or requires multiple years of experience — every persona (incl. the bridge) must be qualified-today or a near-ready internal promotion for THIS role's level
+✗ REJECT if any two personas are the SAME segment under different names — i.e. they share the same life stage AND experience level AND primary motivation (e.g. two entry-level "starter/enthusiast" pools, or a "career changer" and a "bridge worker" that describe the same person). Merge them and replace the freed slot with a genuinely distinct pool, or reduce the persona count.
 ✗ REJECT if all personas share the same educational background
 ✗ REJECT if persona archetypes are personality types rather than prior-background segments
 ✗ REJECT if any archetype/name is a functional skill or trait ("Data-Driven", "Creative Storyteller", "Strategic", "Brand Builder") instead of a sourceable prior-background pool
