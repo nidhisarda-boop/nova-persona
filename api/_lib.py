@@ -295,6 +295,15 @@ TIMEOUT = 20
 # Best-effort enrichment (Adzuna/FRED) must never blow the function time budget.
 # The fallback chain can issue several sequential calls, so each one is kept short.
 ENRICH_TIMEOUT = int(os.environ.get("ENRICH_TIMEOUT", "6"))
+# Per-LLM-provider request timeout. MUST be well under the Vercel function
+# maxDuration (60s) so one slow provider can't consume the whole budget and get
+# the function killed before the fallback chain or our error JSON can return.
+LLM_TIMEOUT = int(os.environ.get("LLM_TIMEOUT", "20"))
+# Hard wall-clock deadline for the whole request (seconds). Set at pipeline start;
+# the LLM loop stops starting new providers once we're within one LLM_TIMEOUT of it,
+# guaranteeing we return our own JSON (honest error) instead of a 504.
+REQUEST_BUDGET_S = int(os.environ.get("REQUEST_BUDGET_S", "56"))
+_REQUEST_DEADLINE = 0.0
 
 
 # ── Stage 1: Jina content fetch ────────────────────────────────────────────
@@ -1403,7 +1412,7 @@ def _call_gemini(prompt: str) -> str:
             "max_tokens": LLM_MAX_TOKENS,
             "response_format": {"type": "json_object"},
         },
-        timeout=60,
+        timeout=LLM_TIMEOUT,
     )
     resp.raise_for_status()
     return resp.json()["choices"][0]["message"]["content"]
@@ -1421,7 +1430,7 @@ def _call_groq(prompt: str) -> str:
             "max_tokens": LLM_MAX_TOKENS,
             "response_format": {"type": "json_object"},
         },
-        timeout=60,
+        timeout=LLM_TIMEOUT,
     )
     resp.raise_for_status()
     return resp.json()["choices"][0]["message"]["content"]
@@ -1442,7 +1451,7 @@ def _call_openai_compatible(url: str, key: str, model: str, prompt: str, extra_h
             "max_tokens": LLM_MAX_TOKENS,
             "response_format": {"type": "json_object"},
         },
-        timeout=60,
+        timeout=LLM_TIMEOUT,
     )
     resp.raise_for_status()
     return resp.json()["choices"][0]["message"]["content"]
@@ -1492,7 +1501,7 @@ def _call_anthropic(prompt: str) -> str:
             "max_tokens": LLM_MAX_TOKENS, "temperature": 0.7,
             "messages": [{"role": "user", "content": prompt}],
         },
-        timeout=60,
+        timeout=LLM_TIMEOUT,
     )
     resp.raise_for_status()
     return resp.json()["content"][0]["text"]
@@ -1552,6 +1561,12 @@ def _call_llm(prompt: str) -> str:
 
     errors = []
     for name, fn in providers:
+        # Stop starting new providers once we're within one provider-timeout of the
+        # request deadline — guarantees we return our own JSON, never a 504.
+        if _REQUEST_DEADLINE and time.time() > (_REQUEST_DEADLINE - LLM_TIMEOUT):
+            errors.append((name, requests.exceptions.Timeout("request budget exhausted")))
+            print(f"[nova] stopping provider chain before {name}: request budget nearly exhausted")
+            break
         for attempt in (1, 2):
             try:
                 return fn(prompt)
@@ -1845,6 +1860,7 @@ def build_persona_response(text: str = "", url: str = "", source: str = "job_des
         Full persona payload dict matching PRD v2.1 schema
     """
     start = time.time()
+    globals()["_REQUEST_DEADLINE"] = start + REQUEST_BUDGET_S
     result = {"_pipeline": {}}
 
     # ── Safety: validate inputs before doing anything ──────────────────────
