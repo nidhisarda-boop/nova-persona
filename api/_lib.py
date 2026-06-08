@@ -984,7 +984,11 @@ CRITICAL RULES FOR PERSONA GENERATION:
 - Sourcing channels MUST be market-specific (India: Naukri, Instahyre, LinkedIn India, AngelList/Wellfound, IIM Jobs, iimjobs.com; US: LinkedIn, Indeed, AngelList; UK: LinkedIn, CWJobs, TotalJobs)
 - Currency and income figures MUST match the role's country (INR for India, USD for US, GBP for UK)
 - The household income classification must use LOCAL market context — Indian HH income tiers differ fundamentally from US Pew tiers
-- household_income_range is the TOTAL HOUSEHOLD income, not the individual's pay from this one role. Most working-age candidates live in dual-earner or multi-income households, so the household figure is typically HIGHER than the role's own salary. Calibrate to a realistic household total for the segment's life stage and earner structure (e.g. a mid-career manager with a working partner sits well above their own base; a young single earner sits near their own pay). Do NOT collapse household income down to just this role's salary.
+- household_income_range is the TOTAL HOUSEHOLD income, not the individual's pay from this one role. Calibrate it to each segment's ACTUAL life stage and earner structure — and vary it widely:
+  • A young first-job worker, a student, or a single earner has a LOW household income, at or near their own pay (e.g. $18k–$40k). Do NOT inflate these.
+  • A dual-earner household (working partner) sits higher — but still realistic (e.g. a working parent on hourly pay with a partner: roughly $45k–$80k, NOT six figures).
+  • Six-figure household income should be RARE and only for a genuinely dual-HIGH-earner situation; it must never be the default. For an entry-level / hourly role, MOST personas sit in the lower to middle bands, with at most one higher — never a cluster of $100k+ households.
+  Do NOT collapse household income to just this role's salary, and equally do NOT push every persona up to six figures. Some low, some moderate, rarely high.
 
 INDIA HOUSEHOLD INCOME TIERS (use when role is India-based):
 - Lower: <₹3L/yr — very high financial pressure
@@ -1035,7 +1039,7 @@ If triggered: the bridge persona OCCUPIES ONE of the score-dictated persona slot
 
 CORPORATE / SENIOR BRIDGE (for corporate_professional and executive_specialist presets, where the 4 signals above rarely apply): include a bridge persona when a displaced senior-talent pool is plausible — e.g. an experienced director or manager from the same domain recently affected by layoffs or restructuring who would take this role as an immediate landing spot. They bring strong capability but carry elevated flight risk. Make that risk explicit in their anti_pattern_signals.churn_trigger (e.g. "leaves the moment a director-level seat opens elsewhere"). This bridge is ONE of the score-dictated personas (it does not reduce the count) and should be ~15–25% of the pool.
 
-OVERQUALIFIED BRIDGE (a senior/manager-level person applying to a role well BELOW their level — e.g. a displaced restaurant manager applying to an hourly Team Member job): this is realistic but it is a SMALL, high-churn stop-gap pool. Keep it to roughly 5–10% of the pool (NOT 15–25%), make the overqualification + high flight risk explicit in their churn_trigger ("leaves the moment a management seat opens"), and set their household_income_range to a REDUCED / stop-gap level or clearly dual-income — do NOT give them their former peak income (an hourly Team Member's household does not sit at a manager's salary). The other personas remain the core qualified pools.
+OVERQUALIFIED BRIDGE (a senior/manager-level person applying to a role well BELOW their level — e.g. a displaced restaurant manager applying to an hourly Team Member job): this is realistic but it is a SMALL, high-churn stop-gap pool. Keep it to roughly 5–10% of the pool (NOT 15–25%), make the overqualification + high flight risk explicit in their churn_trigger ("leaves the moment a management seat opens"). CRITICAL on their household_income_range: they are between roles / in a reduced or transitional situation, so their household income is MODEST, NOT their former management peak and NOT six figures. Their household_income_range MUST NOT be the highest in the persona set — it should sit in the lower-middle to middle band (reflecting a job gap or a single reduced income), comparable to the other hourly personas. Do NOT output $100k+ for someone currently taking an hourly Team Member job. The other personas remain the core qualified pools.
 
 STEP 4 — GENERATE PERSONAS WITH MAXIMUM VARIANCE
 Maximize variance across personas on the highest-scoring axes. Personas that are minor demographic variations of each other are INVALID. Each must represent a genuinely distinct segment with different motivations, financial context, and life stage.
@@ -1079,6 +1083,9 @@ SELF-VALIDATION — Before returning output, check all of these. If any fail, re
 ✗ REJECT if all personas share the same sourcing channel
 ✗ REJECT if any persona is an entry-level / crew / trainee / "aspirant" pool for a role that manages people, owns a P&L/location, or requires multiple years of experience — every persona (incl. the bridge) must be qualified-today or a near-ready internal promotion for THIS role's level
 ✗ REJECT if any two personas are the SAME segment under different names — i.e. they share the same life stage AND experience level AND primary motivation (e.g. two entry-level "starter/enthusiast" pools, or a "career changer" and a "bridge worker" that describe the same person). Merge them and replace the freed slot with a genuinely distinct pool, or reduce the persona count.
+✗ REJECT if a persona's employment_status / label says "part-time" but hours_per_week_expected is 30+ (part-time means under 30 hrs/week) — make the label and the hours consistent.
+✗ REJECT if jd_hard_filters or persona_jd_mismatch.you_want lists a certification, license, or credential (e.g. ServSafe / food-safety certification) that the JD does NOT actually require — do not invent hard requirements the posting never stated.
+✗ REJECT if, for an entry-level/hourly role, more than one persona has a six-figure ($100k+) household_income_range — household income must skew lower and vary; six figures is rare and never clustered.
 ✗ REJECT if all personas share the same educational background
 ✗ REJECT if persona archetypes are personality types rather than prior-background segments
 ✗ REJECT if any archetype/name is a functional skill or trait ("Data-Driven", "Creative Storyteller", "Strategic", "Brand Builder") instead of a sourceable prior-background pool
@@ -2093,6 +2100,15 @@ def build_persona_response(text: str = "", url: str = "", source: str = "job_des
     # Adzuna call actually returned numbers; otherwise the field is absent and the
     # UI shows nothing (we never fabricate a market range).
     _ms_count = (salary_data or {}).get("count") or 0
+    # Plausibility guard: for an explicitly HOURLY / entry-frontline role, a generic
+    # title still pulls higher-paid same-word jobs into Adzuna's average. If the
+    # annual figure is implausibly high for hourly work, suppress it rather than
+    # show a misleading number (better no figure than a wrong one).
+    _role_type = ((lc.get("role_type") if isinstance(lc, dict) else "") or "").lower()
+    _HOURLY_ANNUAL_CEILING = int(os.environ.get("HOURLY_SALARY_CEILING", "48000"))
+    if (salary_data and salary_data.get("mean") and _role_type in ("hourly", "gig")
+            and salary_data["mean"] > _HOURLY_ANNUAL_CEILING):
+        salary_data = {}  # drop the implausible benchmark for this hourly role
     if salary_data and salary_data.get("mean") and _ms_count >= 1:
         # Confidence scales with how many live postings backed the benchmark.
         if _ms_count >= 50:
