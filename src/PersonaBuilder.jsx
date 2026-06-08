@@ -990,7 +990,7 @@ function ExportPackButton({ persona }) {
 
 function PersonaCard({ persona, index, locked, onToggleLock }) {
   const color = ACCENT_COLORS[index % ACCENT_COLORS.length];
-  const { metadata, demographics, financials, drivers_and_friction, tech_profile, evidence_confidence, screening_question, recruiter_action, deal_breakers, candidate_journey } = persona;
+  const { metadata, demographics, financials, drivers_and_friction, tech_profile, evidence_confidence, recruiter_action, deal_breakers } = persona;
 
   return (
     <div style={S.card(color)}>
@@ -1183,53 +1183,6 @@ function PersonaCard({ persona, index, locked, onToggleLock }) {
         {/* Evidence & Confidence */}
         <ConfidencePanel evidence_confidence={evidence_confidence} />
 
-        {/* Optional interview signal (de-emphasized, collapsible) */}
-        {screening_question?.question && (
-          <details style={{ ...S.panel("#f8fafc", "#e2e8f0"), padding: "10px 14px" }}>
-            <summary
-              style={{
-                ...S.panelTitle,
-                color: "#94a3b8",
-                cursor: "pointer",
-                listStyle: "revert",
-                margin: 0,
-              }}
-            >
-              Optional interview signal
-            </summary>
-            <div style={{ fontSize: 13, fontWeight: 700, color: "#1e293b", margin: "8px 0", lineHeight: 1.4 }}>
-              "{screening_question.question}"
-            </div>
-            {screening_question.high_risk_answer && (
-              <div
-                style={{
-                  fontSize: 12,
-                  color: "#9a3412",
-                  background: "#fff7ed",
-                  border: "1px solid #fed7aa",
-                  borderRadius: 8,
-                  padding: "8px 10px",
-                  marginBottom: 6,
-                  lineHeight: 1.5,
-                }}
-              >
-                🚩 <strong>High-risk answer:</strong> {screening_question.high_risk_answer}
-              </div>
-            )}
-            {screening_question.risk_rationale && (
-              <div style={{ fontSize: 12, color: "#64748b", marginBottom: 6, lineHeight: 1.5 }}>
-                <strong style={{ color: "#475569" }}>Why it's a risk: </strong>
-                {screening_question.risk_rationale}
-              </div>
-            )}
-            {screening_question.why_it_matters && (
-              <div style={{ fontSize: 12, color: "#3b82f6", lineHeight: 1.5 }}>
-                💡 {screening_question.why_it_matters}
-              </div>
-            )}
-          </details>
-        )}
-
         {/* Churn Risk */}
         {drivers_and_friction?.anti_pattern_signals && (
           <div style={S.panel("#fff1f2", "#fca5a5")}>
@@ -1262,28 +1215,6 @@ function PersonaCard({ persona, index, locked, onToggleLock }) {
                 </span>
               ))}
             </div>
-          </div>
-        )}
-
-        {/* Candidate journey drop-off map */}
-        {candidate_journey && Object.values(candidate_journey).some((v) => v && String(v).trim()) && (
-          <div style={S.panel("#fff7ed", "#fed7aa")}>
-            <div style={{ ...S.panelTitle, color: "#c2410c" }}>Candidate journey — where they drop off</div>
-            {[
-              ["Discovery", candidate_journey.discovery_risk],
-              ["Click", candidate_journey.click_risk],
-              ["Apply", candidate_journey.apply_risk],
-              ["Interview", candidate_journey.interview_risk],
-              ["Offer", candidate_journey.offer_risk],
-              ["Early churn", candidate_journey.early_churn_risk],
-            ].map(([stage, risk]) =>
-              risk ? (
-                <div key={stage} style={{ fontSize: 12.5, color: "#7c2d12", lineHeight: 1.5, marginBottom: 4, display: "flex", gap: 6 }}>
-                  <span style={{ fontWeight: 700, minWidth: 84, color: "#9a3412" }}>{stage}:</span>
-                  <span>{risk}</span>
-                </div>
-              ) : null
-            )}
           </div>
         )}
 
