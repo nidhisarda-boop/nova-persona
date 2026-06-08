@@ -1094,6 +1094,8 @@ SELF-VALIDATION — Before returning output, check all of these. If any fail, re
 ✗ REJECT if all personas share the same age range
 ✗ REJECT if all personas share the same sourcing channel
 ✗ REJECT if any persona is an entry-level / crew / trainee / "aspirant" pool for a role that manages people, owns a P&L/location, or requires multiple years of experience — every persona (incl. the bridge) must be qualified-today or a near-ready internal promotion for THIS role's level
+✗ REJECT if is_bridge_persona is true for a CORE / direct-fit pool (first-job, student, experienced crew, working parent) or for more than one persona — only the single overqualified/displaced/adjacent bridge carries that flag
+✗ REJECT if target_monthly_income_from_role is not a dollar figure (it MUST be money, e.g. "$2,200"; never a dependency word like "Primary"/"Secondary"/"Supplemental")
 ✗ REJECT if any persona's metadata.name is a personal/human name (e.g. "Alex Rivera", "Samantha Lee") — names MUST be descriptive cohort/segment labels, never invented people
 ✗ REJECT if any two personas are the SAME segment under different names — i.e. they share the same life stage AND experience level AND primary motivation (e.g. two entry-level "starter/enthusiast" pools, or a "career changer" and a "bridge worker" that describe the same person). Merge them and replace the freed slot with a genuinely distinct pool, or reduce the persona count.
 ✗ REJECT if a persona's employment_status / label says "part-time" but hours_per_week_expected is 30+ (part-time means under 30 hrs/week) — make the label and the hours consistent.
@@ -1948,6 +1950,33 @@ def _drop_truncated_personas(data: dict) -> dict:
     return data
 
 
+_BRIDGE_KW = re.compile(r"bridge|displaced|overqualified|laid.?off|former\s+(?:manager|leader)|stop.?gap", re.I)
+
+def _fix_persona_display(data: dict) -> dict:
+    """Deterministic display guards for two model slips:
+    (1) a stray is_bridge_persona flag on a CORE pool (e.g. 'First-Job Crew' tagged
+        Bridge) — keep the bridge tag only on a persona whose name/archetype actually
+        reads as an overqualified/displaced bridge;
+    (2) the 'Expected Monthly' figure (target_monthly_income_from_role) populated with
+        a dependency word like 'Primary'/'Supplemental' instead of a dollar value —
+        blank it so the card never shows a non-money value in a money field."""
+    for p in data.get("personas", []):
+        if not isinstance(p, dict):
+            continue
+        meta = p.get("metadata") or {}
+        fin = p.get("financials") if isinstance(p.get("financials"), dict) else {}
+        # (1) strip a bogus bridge tag from a non-bridge persona
+        if meta.get("is_bridge_persona"):
+            label = f"{meta.get('name','')} {meta.get('archetype','')}"
+            if not _BRIDGE_KW.search(label):
+                meta["is_bridge_persona"] = False
+        # (2) Expected Monthly must contain a number; otherwise drop it
+        tm = fin.get("target_monthly_income_from_role")
+        if isinstance(tm, str) and not re.search(r"\d", tm):
+            fin["target_monthly_income_from_role"] = ""
+    return data
+
+
 def _cap_hourly_household_income(data: dict) -> dict:
     """DETERMINISTIC backstop: for hourly/gig roles the LLM keeps inflating
     household income for income-dependent personas. Cap any over-high range down
@@ -2108,6 +2137,7 @@ def build_persona_response(text: str = "", url: str = "", source: str = "job_des
     data = _parse_json(raw)
     data = validate_output(data)      # schema + safety check before it leaves the server
     data = _drop_truncated_personas(data)  # never render a half-generated trailing persona
+    data = _fix_persona_display(data)      # strip stray bridge tags; clean non-money 'Expected Monthly'
     data = _normalize_segments(data)  # renormalizes % after any drop
     data = _enforce_persona_count(data)   # deterministic, preset-aware count cap
     data = _scrub_internal_tokens(data)   # strip any leaked internal variable names
