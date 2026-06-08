@@ -997,7 +997,7 @@ CRITICAL RULES FOR PERSONA GENERATION:
 - Currency and income figures MUST match the role's country (INR for India, USD for US, GBP for UK)
 - The household income classification must use LOCAL market context — Indian HH income tiers differ fundamentally from US Pew tiers
 - household_income_range is the TOTAL HOUSEHOLD income (not just this role's pay). Calibrate it to each segment's life stage and earner structure, vary it WIDELY across personas, and MATCH THE BANDS TO THE ROLE'S TIER:
-  • ENTRY-LEVEL / HOURLY / FRONTLINE / GIG roles: a young first-job worker, student, or single earner sits LOW ($18k–$40k); a dual-earner working-parent household is moderate ($45k–$85k); six-figure households are RARE, never the default, and never clustered (at most ONE, e.g. an affluent secondary-earner bridge). Do NOT push every hourly persona up to six figures.
+  • ENTRY-LEVEL / HOURLY / FRONTLINE / GIG roles: a young first-job worker, student, or single earner sits LOW ($18k–$40k); a working parent or dual-earner household taking this job FOR the income is modest ($40k–$75k) — the hourly pay is meaningful to them, NOT a minor top-up, so do NOT push a working-parent hourly persona toward six figures. Six-figure households are RARE, never the default, and never clustered — at most ONE, and only a clearly affluent dual-HIGH-income SECONDARY-earner bridge (explicitly framed as supplemental income).
   • CORPORATE / PROFESSIONAL / EXECUTIVE roles: household income is naturally HIGHER and should reflect the role's salary plus likely dual income — six-figure households (and for senior/executive roles, multi-six-figure) are normal and expected. Do NOT suppress these or force them into hourly bands.
   Either way: do NOT collapse household income to just this role's salary, and do NOT make every persona's range identical.
 
@@ -1094,6 +1094,7 @@ SELF-VALIDATION — Before returning output, check all of these. If any fail, re
 ✗ REJECT if all personas share the same age range
 ✗ REJECT if all personas share the same sourcing channel
 ✗ REJECT if any persona is an entry-level / crew / trainee / "aspirant" pool for a role that manages people, owns a P&L/location, or requires multiple years of experience — every persona (incl. the bridge) must be qualified-today or a near-ready internal promotion for THIS role's level
+✗ REJECT if any persona's metadata.name is a personal/human name (e.g. "Alex Rivera", "Samantha Lee") — names MUST be descriptive cohort/segment labels, never invented people
 ✗ REJECT if any two personas are the SAME segment under different names — i.e. they share the same life stage AND experience level AND primary motivation (e.g. two entry-level "starter/enthusiast" pools, or a "career changer" and a "bridge worker" that describe the same person). Merge them and replace the freed slot with a genuinely distinct pool, or reduce the persona count.
 ✗ REJECT if a persona's employment_status / label says "part-time" but hours_per_week_expected is 30+ (part-time means under 30 hrs/week) — make the label and the hours consistent.
 ✗ REJECT if jd_hard_filters or persona_jd_mismatch.you_want lists a certification, license, or credential (e.g. ServSafe / food-safety certification) that the JD does NOT actually require — do not invent hard requirements the posting never stated.
@@ -1386,8 +1387,8 @@ def _build_prompt(jd_text: str, signals: dict, onet: dict, wages: dict, demos: s
   "personas": [
     {
       "metadata": {
-        "name": "string",
-        "archetype": "string — 3-word descriptor (The Gig Maximizer)",
+        "name": "string — a clear COHORT/SEGMENT LABEL for this pool (e.g. 'First-Job Crew', 'Experienced QSR Crew', 'Student Part-Timer', 'Displaced Manager'). NEVER a personal/human name (no 'Alex Rivera').",
+        "archetype": "string — a short prior-background descriptor for the pool (e.g. 'First job, no experience', 'Switching from a competitor'), NOT a personality type",
         "segment_size_percentage": 30,
         "is_bridge_persona": false
       },
