@@ -910,7 +910,7 @@ function PersonaCard({ persona, index, locked, onToggleLock }) {
   const { metadata, demographics, financials, drivers_and_friction, tech_profile, evidence_confidence, deal_breakers } = persona;
 
   return (
-    <div style={S.card(color)}>
+    <div className="nova-card" style={S.card(color)}>
       {/* Lock Button */}
       <button
         style={S.lockBtn(locked)}
@@ -942,7 +942,7 @@ function PersonaCard({ persona, index, locked, onToggleLock }) {
         </div>
       </div>
 
-      <div style={S.cardBody}>
+      <div className="nova-cardbody" style={S.cardBody}>
         {/* Demographics + Financials */}
         <div>
           <div style={S.sectionTitle}>Demographics & Financials</div>
@@ -1467,6 +1467,14 @@ export default function PersonaBuilder() {
       <style>{`
         @keyframes spin { to { transform: rotate(360deg); } }
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap');
+        @media print {
+          /* A persona card taller than a page must NOT be forced whole (that causes
+             garbled text at a mid-block break). Instead, let the card flow and keep
+             each inner section intact, so any page break lands cleanly BETWEEN blocks. */
+          .nova-card { break-inside: auto !important; page-break-inside: auto !important; }
+          .nova-cardbody > * { break-inside: avoid !important; page-break-inside: avoid !important; }
+          .nova-card, .nova-card * { orphans: 3; widows: 3; }
+        }
       `}</style>
 
       {/* Header */}
