@@ -1909,6 +1909,57 @@ def _scrub_internal_tokens(value):
 
 # ── Main entry point ────────────────────────────────────────────────────────
 
+def _parse_money_range(s: str):
+    """Parse a household-income range string ('$80,000–$110,000', '$80k-$110k')
+    into (low, high) integer dollars, or None."""
+    vals = []
+    for num, k in re.findall(r"\$?\s*([\d][\d,.]*)\s*([kK])?", s or ""):
+        n = num.replace(",", "")
+        if not n or n == ".":
+            continue
+        try:
+            v = float(n)
+        except ValueError:
+            continue
+        if k or v < 1000:        # "80k" or a bare "80" → 80,000
+            v *= 1000
+        vals.append(int(round(v)))
+    vals = [v for v in vals if v >= 1000]
+    return (min(vals), max(vals)) if len(vals) >= 2 else None
+
+
+def _cap_hourly_household_income(data: dict) -> dict:
+    """DETERMINISTIC backstop: for hourly/gig roles the LLM keeps inflating
+    household income for income-dependent personas. Cap any over-high range down
+    (preserving its width) so a working-parent/crew persona can't sit at six
+    figures and the bridge can't exceed a modest ceiling. Lowers only; never raises."""
+    lc = data.get("local_context") or {}
+    if (lc.get("role_type") or "").lower() not in ("hourly", "gig"):
+        return data
+    for p in data.get("personas", []):
+        fin = p.get("financials")
+        if not isinstance(fin, dict):
+            continue
+        rng = fin.get("household_income_range")
+        parsed = _parse_money_range(rng) if isinstance(rng, str) else None
+        if not parsed:
+            continue
+        low, high = parsed
+        is_bridge = bool((p.get("metadata") or {}).get("is_bridge_persona"))
+        ceiling = 105000 if is_bridge else 75000
+        if high <= ceiling:
+            continue
+        width = max(high - low, 10000)
+        new_high = ceiling
+        new_low = max(new_high - width, 15000)
+        use_k = "k" in rng.lower()
+        if use_k:
+            fin["household_income_range"] = f"${new_low // 1000}k–${new_high // 1000}k"
+        else:
+            fin["household_income_range"] = f"${new_low:,}–${new_high:,}"
+    return data
+
+
 def build_persona_response(text: str = "", url: str = "", source: str = "job_description",
                            mode: str = "job_description") -> dict:
     """
@@ -2047,6 +2098,10 @@ def build_persona_response(text: str = "", url: str = "", source: str = "job_des
             lc["posted_compensation"] = signals["salary"]
         if not lc.get("metro_area") and signals.get("location"):
             lc["metro_area"] = signals["location"]
+
+    # Deterministic income backstop — the prompt can't reliably hold hourly HH down,
+    # so cap it here (working parent / income-dependent ≤ $75k, bridge ≤ $105k).
+    data = _cap_hourly_household_income(data)
 
     # Resolve the best title + location we have, preferring deterministic signals
     # but falling back to the LLM's own role_summary / metro when extraction missed.
