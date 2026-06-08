@@ -279,6 +279,7 @@ SAMBANOVA_KEY   = os.environ.get("SAMBANOVA_API_KEY", "")
 COHERE_KEY      = os.environ.get("COHERE_API_KEY") or os.environ.get("COHERSE_API_KEY", "")
 ZHIPU_KEY       = os.environ.get("ZHIPU_API_KEY", "")
 SILICONFLOW_KEY = os.environ.get("SILICONFLOW_API_KEY", "")
+DEEPSEEK_KEY    = os.environ.get("DEEPSEEK_API_KEY", "")
 
 # Data enrichment (real salary grounding via Adzuna — global coverage).
 ENABLE_ENRICHMENT = os.environ.get("ENABLE_DATA_ENRICHMENT", "").lower() in ("1", "true", "yes", "on")
@@ -1570,9 +1571,12 @@ def _call_anthropic(prompt: str, timeout: int = LLM_TIMEOUT) -> str:
 # Model strings updated to current valid ones (the old defaults had been retired:
 # grok-2-latest → grok-4.3; command-r-plus → command-a-03-2025).
 _EXTRA_OAI = [
-    ("openai", OPENAI_KEY, "https://api.openai.com/v1/chat/completions",              "OPENAI_MODEL", "gpt-4o-mini"),
-    ("xai",    XAI_KEY,    "https://api.x.ai/v1/chat/completions",                    "XAI_MODEL",    "grok-4.3"),
-    ("cohere", COHERE_KEY, "https://api.cohere.ai/compatibility/v1/chat/completions", "COHERE_MODEL", "command-a-03-2025"),
+    # DeepSeek first among the paid providers — cheap + reliable, so it's the
+    # preferred paid fallback BEFORE the low-balance Anthropic floor.
+    ("deepseek", DEEPSEEK_KEY, "https://api.deepseek.com/v1/chat/completions",          "DEEPSEEK_MODEL", "deepseek-v4-flash"),
+    ("openai",   OPENAI_KEY,   "https://api.openai.com/v1/chat/completions",              "OPENAI_MODEL",   "gpt-4o-mini"),
+    ("xai",      XAI_KEY,      "https://api.x.ai/v1/chat/completions",                    "XAI_MODEL",      "grok-4.3"),
+    ("cohere",   COHERE_KEY,   "https://api.cohere.ai/compatibility/v1/chat/completions", "COHERE_MODEL",   "command-a-03-2025"),
 ]
 
 
