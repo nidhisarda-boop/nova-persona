@@ -1547,7 +1547,7 @@ def _call_anthropic(prompt: str) -> str:
         "https://api.anthropic.com/v1/messages",
         headers={"x-api-key": ANTHROPIC_KEY, "anthropic-version": "2023-06-01", "Content-Type": "application/json"},
         json={
-            "model": os.environ.get("ANTHROPIC_MODEL", "claude-3-5-haiku-latest"),
+            "model": os.environ.get("ANTHROPIC_MODEL", "claude-haiku-4-5-20251001"),
             "max_tokens": LLM_MAX_TOKENS, "temperature": 0.7,
             "messages": [{"role": "user", "content": prompt}],
         },
@@ -1558,16 +1558,15 @@ def _call_anthropic(prompt: str) -> str:
 
 
 # Additional OpenAI-compatible providers (name, key, url, model-env, default-model).
+# Trimmed to providers that actually work or are fixable. Removed dead weight that
+# consistently failed: mistral/nvidia/zhipu (chronic timeouts), together/sambanova/
+# siliconflow (no account credit → 402/403). Re-add them only with funded keys.
+# Model strings updated to current valid ones (the old defaults had been retired:
+# grok-2-latest → grok-4.3; command-r-plus → command-a-03-2025).
 _EXTRA_OAI = [
-    ("openai",      OPENAI_KEY,      "https://api.openai.com/v1/chat/completions",              "OPENAI_MODEL",      "gpt-4o-mini"),
-    ("mistral",     MISTRAL_KEY,     "https://api.mistral.ai/v1/chat/completions",              "MISTRAL_MODEL",     "mistral-large-latest"),
-    ("together",    TOGETHER_KEY,    "https://api.together.xyz/v1/chat/completions",            "TOGETHER_MODEL",    "meta-llama/Llama-3.3-70B-Instruct-Turbo"),
-    ("xai",         XAI_KEY,         "https://api.x.ai/v1/chat/completions",                    "XAI_MODEL",         "grok-2-latest"),
-    ("nvidia",      NVIDIA_KEY,      "https://integrate.api.nvidia.com/v1/chat/completions",    "NVIDIA_MODEL",      "meta/llama-3.3-70b-instruct"),
-    ("sambanova",   SAMBANOVA_KEY,   "https://api.sambanova.ai/v1/chat/completions",            "SAMBANOVA_MODEL",   "Meta-Llama-3.3-70B-Instruct"),
-    ("cohere",      COHERE_KEY,      "https://api.cohere.ai/compatibility/v1/chat/completions", "COHERE_MODEL",      "command-r-plus"),
-    ("zhipu",       ZHIPU_KEY,       "https://open.bigmodel.cn/api/paas/v4/chat/completions",   "ZHIPU_MODEL",       "glm-4-flash"),
-    ("siliconflow", SILICONFLOW_KEY, "https://api.siliconflow.cn/v1/chat/completions",          "SILICONFLOW_MODEL", "Qwen/Qwen2.5-72B-Instruct"),
+    ("openai", OPENAI_KEY, "https://api.openai.com/v1/chat/completions",              "OPENAI_MODEL", "gpt-4o-mini"),
+    ("xai",    XAI_KEY,    "https://api.x.ai/v1/chat/completions",                    "XAI_MODEL",    "grok-4.3"),
+    ("cohere", COHERE_KEY, "https://api.cohere.ai/compatibility/v1/chat/completions", "COHERE_MODEL", "command-a-03-2025"),
 ]
 
 
