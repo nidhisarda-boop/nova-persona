@@ -962,8 +962,15 @@ GENERATE EXACTLY this many persona objects, and set target_persona_count to the 
 
 CROSS-AXIS VALIDATION: If Axis B = 3, Axis A CANNOT = 1.
 
+SENIORITY FLOOR — MATCH EVERY PERSONA TO THE ROLE'S ACTUAL LEVEL (applies before all persona generation below):
+Determine the role's seniority from its title + requirements. If it is an EXPERIENCED or MANAGEMENT-level role — i.e. it manages people / owns a P&L / location, or requires multiple years of experience (e.g. Restaurant Manager, Store Manager, General Manager, Engineering Manager) — then EVERY persona, INCLUDING the bridge, must be someone realistically qualified for THIS role TODAY or a near-ready internal promotion.
+- The LARGEST direct-fit pool is people already doing this job or exactly one clear step below — e.g. for a Restaurant Manager: current Restaurant Managers and Assistant/General Managers at competitors. NOT shift-level crew, and NOT entry-level workers.
+- Do NOT include an entry-level, crew, trainee, "aspirant", or "low-barrier entry" pool as a persona for a management role. That pool belongs in a Shift Leader / management-trainee map, not here. If you are tempted to add it, replace it with a qualified adjacent pool instead (e.g. retail STORE manager, hospitality OPERATIONS manager, multi-unit supervisor).
+- For a management role the bridge MUST be a comparably-senior ADJACENT pool (retail store manager, hospitality operations manager, veteran operations/logistics leader), ~10–20% of the pool — never an under-qualified entry pool, and never over-indexed.
+
 STEP 3 — BRIDGE PERSONA EVALUATION
-Include a Bridge Persona if AT LEAST 2 of these 4 signals are true:
+First apply the SENIORITY FLOOR above. The 4 low-barrier signals below select an ENTRY-LEVEL bridge and apply ONLY to genuinely entry-level / hourly-frontline roles (cashier, crew member, driver, warehouse associate). For any experienced/management role, IGNORE these 4 signals and use the comparably-senior adjacent bridge from the SENIORITY FLOOR rule instead.
+Include an entry-level Bridge Persona ONLY for an entry-level role and if AT LEAST 2 of these 4 signals are true:
 1. Low barrier to entry (no degree/license, onboarding in days)
 2. Flexible/short-term structure (contract, seasonal, part-time, gig)
 3. Economic vulnerability (wages at or below local median, or hourly pay)
@@ -1010,6 +1017,7 @@ GIG/CONTRACTOR ROLE SPECIAL RULES (apply when preset = gig_flexible or hourly_fr
 SELF-VALIDATION — Before returning output, check all of these. If any fail, regenerate:
 ✗ REJECT if all personas share the same age range
 ✗ REJECT if all personas share the same sourcing channel
+✗ REJECT if any persona is an entry-level / crew / trainee / "aspirant" pool for a role that manages people, owns a P&L/location, or requires multiple years of experience — every persona (incl. the bridge) must be qualified-today or a near-ready internal promotion for THIS role's level
 ✗ REJECT if all personas share the same educational background
 ✗ REJECT if persona archetypes are personality types rather than prior-background segments
 ✗ REJECT if any archetype/name is a functional skill or trait ("Data-Driven", "Creative Storyteller", "Strategic", "Brand Builder") instead of a sourceable prior-background pool
