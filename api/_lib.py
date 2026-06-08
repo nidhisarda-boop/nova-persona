@@ -1598,11 +1598,13 @@ def _call_llm(prompt: str) -> str:
         providers.append(("openrouter", _call_openrouter))
     if GITHUB_MODELS_KEY:
         providers.append(("github", _call_github))
-    if ANTHROPIC_KEY:
-        providers.append(("anthropic", _call_anthropic))
     for _name, _key, _url, _menv, _mdef in _EXTRA_OAI:
         if _key:
             providers.append((_name, _make_oai_caller(_url, _key, os.environ.get(_menv, _mdef))))
+    # Anthropic is a PAID, low-balance key — keep it as the ABSOLUTE LAST resort so
+    # it only spends credit when every free and other provider has failed.
+    if ANTHROPIC_KEY:
+        providers.append(("anthropic", _call_anthropic))
 
     if not providers:
         raise RuntimeError(
