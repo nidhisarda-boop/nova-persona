@@ -129,19 +129,17 @@ class handler(BaseHTTPRequestHandler):
             # Upstream LLM rate-limited or down — 503 with a clear retry message
             self._json({"error": str(e), "error_type": "llm_unavailable"}, 503)
         except Exception as e:
-            # Log the real error to the server (visible in Vercel logs only),
-            # return a generic message so internal details never reach the client.
+            # Internal tool: surface the TRUE failure reason rather than a vague
+            # "something went wrong". Always logs the full traceback server-side.
             import traceback
             traceback.print_exc()
             payload = {
-                "error": "Something went wrong while generating personas. Please try again.",
-                "error_type": "server_error"
+                "error": f"Persona generation failed: {type(e).__name__}: {e}",
+                "error_type": "server_error",
             }
-            # TEMP DEBUG (v4 preview only — REMOVE before merging to main): surface the
-            # real traceback so we can root-cause the 500 without server log access.
-            if os.environ.get("DEBUG_ERRORS", "1") == "1":
-                payload["debug_detail"] = f"{type(e).__name__}: {e}"
-                payload["debug_trace"] = traceback.format_exc()[-1500:]
+            # Full traceback only when explicitly enabled (default off).
+            if os.environ.get("DEBUG_ERRORS", "0") == "1":
+                payload["debug_trace"] = traceback.format_exc()[-2000:]
             self._json(payload, 500)
 
     def _cors(self):

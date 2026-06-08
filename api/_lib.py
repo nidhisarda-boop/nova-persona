@@ -920,6 +920,7 @@ CRITICAL RULES FOR PERSONA GENERATION:
 - EVIDENCE INTEGRITY: evidence_basis, notes, and confidence fields may ONLY cite a source whose data was actually supplied in INPUT DATA (STRUCTURED_JD, ONET_GROUNDING, MARKET_GROUNDING). NEVER invent source names such as "LinkedIn postings", "Glassdoor salary data", "Indeed insights", or "alumni placement data".
 - STRUCTURED_JD fields COUNT AS SOURCED. When salary or location came from STRUCTURED_JD, treat them as grounded: evidence_basis should say "Sourced from the job posting", salary/location are High confidence, and sourced_vs_inferred must state which facts came from the JD vs were inferred. Only when neither the JD nor an external source provided salary/location do you write "Inferred from JD requirements; external salary source not used" and keep overall_score ≤ 65.
 - NO NAMED SALARY SOURCES: never attribute an inferred salary/income figure to a specific website, report, or dataset you were not given (e.g. "SalaryExpert", "Payscale", "Glassdoor", "BLS", "ZipRecruiter salary data"). If a figure is inferred, write exactly "inferred from US labor-market norms" — naming a source you did not receive is fabrication. EXCEPTION: if ADZUNA_SALARY data is present in INPUT DATA, it WAS actually queried for this role — you MUST use it to ground compensation, cite it as "Adzuna market data", and mark salary as SOURCED / High confidence.
+- NO FABRICATED PERKS OR OWNERSHIP: never claim the role offers equity, ownership, stock, profit-share, a franchise, or any specific benefit the JD does not explicitly state — in conversion_hook, job_ad_rewrite, recommendations, or anywhere. In particular do NOT use the word "equity" or imply ownership unless the JD literally states it. If the JD mentions an advancement path (e.g. "fast-track to Operating Partner"), describe it as a "path to [role] and higher earning potential", NOT as equity or ownership.
 - Personas MUST be labor-market segments (real candidate pools with distinct backgrounds and paths to this role), NOT personality archetypes ("The Results Driver", "The Relationship Builder")
 - Each persona's archetype AND name must name a SOURCEABLE prior-background talent pool — a real group you could filter for on LinkedIn/Naukri by their last role, industry, or employer type (e.g. "Agency Campaign Operator", "CPG Brand Marketer", "Media-Agency Social Lead", "The Ad Ops Operator", "The SaaS CS Migrant")
 - BANNED as an archetype or name: functional skills or personality traits that EVERY candidate for this role would share — e.g. "Data-Driven", "Creative", "Storyteller", "Data-Driven Brand Builder", "Creative Storyteller", "Strategic Thinker", "Results-Driven", "Innovative". These are not distinct candidate pools and cannot be sourced. Litmus test: if you cannot rephrase the archetype as "their last role was X" or "they come from Y industry", it is INVALID — fix it before returning.
@@ -927,6 +928,7 @@ CRITICAL RULES FOR PERSONA GENERATION:
 - Sourcing channels MUST be market-specific (India: Naukri, Instahyre, LinkedIn India, AngelList/Wellfound, IIM Jobs, iimjobs.com; US: LinkedIn, Indeed, AngelList; UK: LinkedIn, CWJobs, TotalJobs)
 - Currency and income figures MUST match the role's country (INR for India, USD for US, GBP for UK)
 - The household income classification must use LOCAL market context — Indian HH income tiers differ fundamentally from US Pew tiers
+- household_income_range is the TOTAL HOUSEHOLD income, not the individual's pay from this one role. Most working-age candidates live in dual-earner or multi-income households, so the household figure is typically HIGHER than the role's own salary. Calibrate to a realistic household total for the segment's life stage and earner structure (e.g. a mid-career manager with a working partner sits well above their own base; a young single earner sits near their own pay). Do NOT collapse household income down to just this role's salary.
 
 INDIA HOUSEHOLD INCOME TIERS (use when role is India-based):
 - Lower: <₹3L/yr — very high financial pressure
@@ -1080,6 +1082,7 @@ V1.5 INTELLIGENCE FIELDS (populate well — these are the product's wedge):
 - evidence_confidence.confidence_breakdown: honestly bucket fields into high/medium/low. JD-sourced facts (location, salary, experience) are HIGH; inferred demographics (household income, age range) are LOW. Be honest — this is the trust feature.
 - recruiter_action.outreach_script: a real, ready-to-send 3-sentence message in the segment's tone, referencing the JD's best perks. No fabricated specifics.
 - persona_jd_mismatch (top-level): "who you want" vs "who the JD will actually attract", the gap, and the fix. Nova's wedge is WHO WILL ACTUALLY APPLY — not the company's ideal. Make this sharp and employer-brand-useful.
+- CALIBRATE REQUIREMENTS TO THE ROLE'S ACTUAL SCOPE: do not inflate seniority beyond what the role needs. A manager of ONE high-volume location is NOT a multi-unit/area manager — never state "multi-unit management experience" (or similar broader scope) as a hard requirement for a single-location role. If the JD mentions broader scope only as a future growth path, treat it as "preferred", not "required". In jd_hard_filters and persona_jd_mismatch.you_want, frame advanced/broader experience as "preferred" and keep the hard minimum tied to the role's real scope (e.g. "2+ years managing a high-volume restaurant; multi-unit exposure preferred"), so you don't screen out strong single-unit candidates.
 
 Return ONLY valid JSON. No markdown. No explanation."""
 
@@ -1583,19 +1586,48 @@ def _call_llm(prompt: str) -> str:
                 print(f"[nova] {name} failed ({e})")
                 break
 
-    # Every configured provider failed.
-    def _is_rate_limit(e):
-        return isinstance(e, requests.exceptions.HTTPError) and getattr(e.response, "status_code", None) == 429
+    # Every configured provider failed. Report the TRUE cause — this is an internal
+    # tool, so an honest "all providers exhausted / timed out" beats a vague message
+    # or (worse) fabricating a result.
+    def _reason(e):
+        if isinstance(e, requests.exceptions.HTTPError):
+            sc = getattr(e.response, "status_code", None)
+            if sc == 429:
+                return "rate-limited (429)"
+            if sc in (401, 402, 403):
+                return f"quota/auth ({sc})"
+            return f"HTTP {sc}"
+        if isinstance(e, requests.exceptions.Timeout):
+            return "timed out"
+        if isinstance(e, requests.exceptions.ConnectionError):
+            return "connection error"
+        return type(e).__name__
 
-    if any(_is_rate_limit(e) for _, e in errors):
+    n = len(errors)
+    n_rl = sum(1 for _, e in errors if isinstance(e, requests.exceptions.HTTPError)
+               and getattr(e.response, "status_code", None) == 429)
+    n_to = sum(1 for _, e in errors if isinstance(e, requests.exceptions.Timeout))
+    summary = "; ".join(f"{name}: {_reason(e)}" for name, e in errors) or "no providers configured"
+
+    if n and n_rl == n:
         raise LLMUnavailableError(
-            "The AI model is receiving too many requests right now. "
-            "Please wait a minute and try again."
+            f"AI generation failed: all {n} model providers are rate-limited / quota-exhausted "
+            f"right now. Please wait a minute and retry. [{summary}]"
+        )
+    if n and n_to == n:
+        raise LLMUnavailableError(
+            f"AI generation failed: all {n} model providers timed out (no response within the time "
+            f"limit). Please retry shortly. [{summary}]"
+        )
+    if n and (n_rl + n_to) == n:
+        raise LLMUnavailableError(
+            f"AI generation failed: all {n} model providers were exhausted (rate-limited) or timed "
+            f"out. Please retry shortly. [{summary}]"
         )
     if any(isinstance(e, (requests.exceptions.Timeout, requests.exceptions.ConnectionError,
                           requests.exceptions.HTTPError)) for _, e in errors):
         raise LLMUnavailableError(
-            "The AI model is temporarily unavailable. Please try again in a moment."
+            f"AI generation failed: every model provider errored. Please try again. [{summary}]"
         )
     # Unknown failure — re-raise so it surfaces (and gets logged) as a 500.
     raise errors[-1][1]
