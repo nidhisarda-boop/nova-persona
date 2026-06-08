@@ -661,6 +661,38 @@ def _us_state_for(location: str, content: str) -> str:
 
 _LAST_ADZUNA_DIAG = {}  # TEMP DEBUG: records why the last Adzuna call did/didn't fire
 
+# Titles too generic to query Adzuna on their own — they match unrelated, often
+# higher-paying jobs across other industries and pollute the average.
+_GENERIC_TITLE_RX = re.compile(
+    r"^\s*(?:team\s*member|crew\s*member|crew|team\s*lead(?:er)?|team|member|"
+    r"associate|staff(?:\s*member)?|worker|general\s*worker|hourly\s*associate|"
+    r"floor\s*staff|operative)\s*$",
+    re.IGNORECASE,
+)
+
+# Industry keyword to disambiguate a generic title, detected from the JD content.
+_INDUSTRY_HINTS = [
+    (r"restaurant|fast.?food|kitchen|barista|qsr|drive.?thru|food\s*service|"
+     r"cook|fryer|burger|menu|guest|crew|whataburger|mcdonald|wendy|taco bell", "restaurant"),
+    (r"\bretail\b|store|merchandis|planogram|cashier|stockroom|shopper|checkout", "retail"),
+    (r"warehouse|fulfil|distribution|forklift|pallet|pick.?pack|loading dock|sortation", "warehouse"),
+    (r"hotel|hospitality|housekeep|front desk|guest room|resort|concierge", "hospitality"),
+    (r"call\s*center|contact\s*center|customer support|inbound|outbound calls", "call center"),
+    (r"caregiv|home care|patient|nursing|\bcna\b|\baide\b|assisted living", "care"),
+    (r"cleaning|janitorial|custodial", "cleaning"),
+    (r"delivery|courier|\bdriver\b|route", "delivery"),
+    (r"warehouse|manufactur|assembly line|production line|plant", "manufacturing"),
+]
+
+
+def _industry_hint(content: str) -> str:
+    blob = (content or "")[:2500]
+    for rx, kw in _INDUSTRY_HINTS:
+        if re.search(rx, blob, re.IGNORECASE):
+            return kw
+    return ""
+
+
 def _enrich_salary(title: str, location: str, market: str, content: str) -> dict:
     """Real salary benchmark from Adzuna for THIS title × location. Global coverage.
     Returns {} unless ENABLE_DATA_ENRICHMENT and Adzuna keys are set."""
@@ -681,6 +713,16 @@ def _enrich_salary(title: str, location: str, market: str, content: str) -> dict
         _LAST_ADZUNA_DIAG["reason"] = f"no_adzuna_country_for_market ({market})"
         return {}
 
+    # Qualify over-generic titles ("Team Member", "Associate", "Crew") with an
+    # industry keyword from the JD so Adzuna matches the RIGHT jobs instead of
+    # averaging in unrelated higher-paying roles that share the word.
+    what_term = title
+    if _GENERIC_TITLE_RX.match(title or ""):
+        hint = _industry_hint(content)
+        if hint:
+            what_term = f"{title} {hint}"
+            _LAST_ADZUNA_DIAG["qualified_query"] = what_term
+
     # Attempt chain — narrow to broad: city -> state -> national. Adzuna's
     # city-level salary coverage is patchy, so we widen the geography step by
     # step rather than jumping straight to the country average.
@@ -698,7 +740,7 @@ def _enrich_salary(title: str, location: str, market: str, content: str) -> dict
         try:
             params = {
                 "app_id": ADZUNA_APP_ID, "app_key": ADZUNA_APP_KEY,
-                "what": title, "results_per_page": 50, "content-type": "application/json",
+                "what": what_term, "results_per_page": 50, "content-type": "application/json",
             }
             if where:
                 params["where"] = where
