@@ -302,7 +302,7 @@ LLM_TIMEOUT = int(os.environ.get("LLM_TIMEOUT", "20"))
 # Hard wall-clock deadline for the whole request (seconds). Set at pipeline start;
 # the LLM loop stops starting new providers once we're within one LLM_TIMEOUT of it,
 # guaranteeing we return our own JSON (honest error) instead of a 504.
-REQUEST_BUDGET_S = int(os.environ.get("REQUEST_BUDGET_S", "56"))
+REQUEST_BUDGET_S = int(os.environ.get("REQUEST_BUDGET_S", "110"))
 _REQUEST_DEADLINE = 0.0
 
 
