@@ -827,9 +827,31 @@ def _extract_signals(text: str) -> dict:
     if sal_label:
         signals["salary"] = sal_label.group(1).strip()
     else:
-        sal_m = re.search(r"[\$£€₹]\s?[\d.,]+(?:\s*[-–]\s*[\$£€₹]?\s?[\d.,]+)?(?:\s*[KkMm])?", text)
-        if sal_m:
-            signals["salary"] = sal_m.group(0).strip()
+        # Unlabeled $-figure fallback. Be careful NOT to mistake a business metric
+        # (e.g. "own a $4M+ location", "$2.5M in annual sales") for someone's pay.
+        # Reject million-scale figures (a bare $XM is essentially never an individual
+        # base salary) and any figure sitting in a revenue/asset/volume context.
+        _BIZ_CTX = re.compile(
+            r"\b(?:location|locations|restaurant|store|stores|outlet|outlets|unit|units|"
+            r"sales|revenue|budget|portfolio|valuation|funding|raised?|turnover|aum|auv|"
+            r"p&l|facility|facilities|account|accounts|deal|deals|in\s+annual|in\s+revenue|"
+            r"in\s+sales)\b",
+            re.IGNORECASE,
+        )
+        chosen = ""
+        for mt in re.finditer(
+            r"[\$£€₹]\s?[\d.,]+(?:\s*[-–]\s*[\$£€₹]?\s?[\d.,]+)?\s*([KkMm])?", text
+        ):
+            suffix = (mt.group(1) or "").lower()
+            after = text[mt.end():mt.end() + 30]
+            if suffix == "m":            # $4M / $2.5M → business figure, not a salary
+                continue
+            if _BIZ_CTX.search(after):   # "$X ... location/sales/revenue" → not a salary
+                continue
+            chosen = mt.group(0).strip()
+            break
+        if chosen:
+            signals["salary"] = chosen
         else:
             lpa = re.search(r"[\d.,]+\s*(?:LPA|lakhs?|crore)\b", text, re.IGNORECASE)
             if lpa:
@@ -988,6 +1010,7 @@ SELF-VALIDATION — Before returning output, check all of these. If any fail, re
 ✗ REJECT if any archetype/name is a functional skill or trait ("Data-Driven", "Creative Storyteller", "Strategic", "Brand Builder") instead of a sourceable prior-background pool
 ✗ REJECT if STRUCTURED_JD provides a work_location or salary but you output "Not specified" / omit it — you MUST use the structured value verbatim
 ✗ REJECT if pew_household_income_tier contradicts household_income_range per the tier bands (e.g. labeling ~$80k "Lower-middle" when that band is $35k–$65k)
+✗ REJECT if household_income_range is IDENTICAL across personas — each segment has a different household financial reality (a dual-income veteran, a single-parent earner, a student household, and a career-changer do NOT all sit in the same band). Give each persona a household_income_range that reflects its own life stage and earner structure; no two personas may share the exact same range, and the spread across personas must be meaningful (the lowest and highest segments should differ by at least one full tier).
 ✗ REJECT if target_monthly_income_from_role is inconsistent with the JD's stated salary (gross monthly ≈ JD annual ÷ 12) when the JD states a salary
 ✗ REJECT if overall_score is ≥ 75 while salary AND location were NOT grounded (no structured salary/location and no external source) — in that case overall_score must be ≤ 65
 ✗ REJECT if the JD's shift constraint, location, or required metrics do NOT appear in at least one churn_trigger or screening_question
@@ -2019,10 +2042,8 @@ def build_persona_response(text: str = "", url: str = "", source: str = "job_des
         data["_provider"] = "gemini" if GEMINI_KEY else "groq"
         data["_pipeline_ms"] = round((time.time() - start) * 1000)
         data["_pipeline"] = result["_pipeline"]
+        data["_adzuna_diag"] = _adzuna_diag  # inspectable only in debug mode
         return data
 
     # Production: strip every internal/debug field so nothing leaks to the browser.
-    out = {k: v for k, v in data.items() if not k.startswith("_")}
-    # TEMP DEBUG: surface why Adzuna did/didn't fire (no secret values — booleans + reason only).
-    out["enrichment_diag"] = _adzuna_diag
-    return out
+    return {k: v for k, v in data.items() if not k.startswith("_")}

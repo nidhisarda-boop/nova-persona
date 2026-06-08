@@ -643,7 +643,7 @@ function AxisGrid({ diversityScoring }) {
 }
 
 function Banner({ data }) {
-  const { role_summary, recruiter_brief, local_context, diversity_scoring, market_salary, enrichment_diag } = data;
+  const { role_summary, recruiter_brief, local_context, diversity_scoring, market_salary } = data;
   const totalScore = diversity_scoring?.total_score ?? 0;
   const personaCount = diversity_scoring?.target_persona_count ?? 0;
   const bridgeIncluded = diversity_scoring?.bridge_persona_included;
@@ -745,20 +745,6 @@ function Banner({ data }) {
           </div>
         );
       })()}
-
-      {!market_salary && enrichment_diag && (
-        <div style={{ marginTop: 10, padding: "8px 12px", background: "#fff7ed", border: "1px dashed #fdba74", borderRadius: 8, fontSize: 12, color: "#9a3412", fontFamily: "monospace" }}>
-          <strong>Market range debug:</strong> {enrichment_diag.reason || "n/a"}
-          {" · "}enrich={String(enrichment_diag.enrichment_enabled)}
-          {" · "}id={String(enrichment_diag.app_id_present)}
-          {" · "}key={String(enrichment_diag.app_key_present)}
-          {" · "}title="{enrichment_diag.title}"
-          {" · "}market={enrichment_diag.market}
-          {enrichment_diag.country_code != null && <> · cc={enrichment_diag.country_code || "∅"}</>}
-          {enrichment_diag.http_status != null && <> · http={enrichment_diag.http_status}</>}
-          {enrichment_diag.count != null && <> · count={enrichment_diag.count}</>}
-        </div>
-      )}
 
       {diversity_scoring && (
         <>
