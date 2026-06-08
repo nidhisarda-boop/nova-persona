@@ -298,7 +298,7 @@ ENRICH_TIMEOUT = int(os.environ.get("ENRICH_TIMEOUT", "6"))
 # Per-LLM-provider request timeout. MUST be well under the Vercel function
 # maxDuration (60s) so one slow provider can't consume the whole budget and get
 # the function killed before the fallback chain or our error JSON can return.
-LLM_TIMEOUT = int(os.environ.get("LLM_TIMEOUT", "20"))
+LLM_TIMEOUT = int(os.environ.get("LLM_TIMEOUT", "60"))
 # Hard wall-clock deadline for the whole request (seconds). Set at pipeline start;
 # the LLM loop stops starting new providers once we're within one LLM_TIMEOUT of it,
 # guaranteeing we return our own JSON (honest error) instead of a 504.
@@ -1452,7 +1452,7 @@ def _build_prompt(jd_text: str, signals: dict, onet: dict, wages: dict, demos: s
 
 # ── Stage 5: LLM call (Gemini → Groq) ──────────────────────────────────────
 
-def _call_gemini(prompt: str) -> str:
+def _call_gemini(prompt: str, timeout: int = LLM_TIMEOUT) -> str:
     """Call Gemini Flash via OpenAI-compatible endpoint."""
     resp = requests.post(
         "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
@@ -1464,13 +1464,13 @@ def _call_gemini(prompt: str) -> str:
             "max_tokens": LLM_MAX_TOKENS,
             "response_format": {"type": "json_object"},
         },
-        timeout=LLM_TIMEOUT,
+        timeout=timeout,
     )
     resp.raise_for_status()
     return resp.json()["choices"][0]["message"]["content"]
 
 
-def _call_groq(prompt: str) -> str:
+def _call_groq(prompt: str, timeout: int = LLM_TIMEOUT) -> str:
     """Call Groq Llama 3.3 70B."""
     resp = requests.post(
         "https://api.groq.com/openai/v1/chat/completions",
@@ -1482,13 +1482,14 @@ def _call_groq(prompt: str) -> str:
             "max_tokens": LLM_MAX_TOKENS,
             "response_format": {"type": "json_object"},
         },
-        timeout=LLM_TIMEOUT,
+        timeout=timeout,
     )
     resp.raise_for_status()
     return resp.json()["choices"][0]["message"]["content"]
 
 
-def _call_openai_compatible(url: str, key: str, model: str, prompt: str, extra_headers: dict = None) -> str:
+def _call_openai_compatible(url: str, key: str, model: str, prompt: str, extra_headers: dict = None,
+                            timeout: int = LLM_TIMEOUT) -> str:
     """Generic caller for any OpenAI-compatible /chat/completions endpoint."""
     headers = {"Authorization": f"Bearer {key}", "Content-Type": "application/json"}
     if extra_headers:
@@ -1503,23 +1504,24 @@ def _call_openai_compatible(url: str, key: str, model: str, prompt: str, extra_h
             "max_tokens": LLM_MAX_TOKENS,
             "response_format": {"type": "json_object"},
         },
-        timeout=LLM_TIMEOUT,
+        timeout=timeout,
     )
     resp.raise_for_status()
     return resp.json()["choices"][0]["message"]["content"]
 
 
-def _call_cerebras(prompt: str) -> str:
+def _call_cerebras(prompt: str, timeout: int = LLM_TIMEOUT) -> str:
     """Cerebras — fast Llama 3.3 70B, generous free tier (1M tokens/day)."""
     return _call_openai_compatible(
         "https://api.cerebras.ai/v1/chat/completions",
         CEREBRAS_KEY,
         os.environ.get("CEREBRAS_MODEL", "gpt-oss-120b"),
         prompt,
+        timeout=timeout,
     )
 
 
-def _call_openrouter(prompt: str) -> str:
+def _call_openrouter(prompt: str, timeout: int = LLM_TIMEOUT) -> str:
     """OpenRouter — aggregator with free models."""
     return _call_openai_compatible(
         "https://openrouter.ai/api/v1/chat/completions",
@@ -1530,20 +1532,22 @@ def _call_openrouter(prompt: str) -> str:
             "HTTP-Referer": "https://nova-persona.vercel.app",
             "X-Title": "Nova Candidate Map",
         },
+        timeout=timeout,
     )
 
 
-def _call_github(prompt: str) -> str:
+def _call_github(prompt: str, timeout: int = LLM_TIMEOUT) -> str:
     """GitHub Models — free with a GitHub token."""
     return _call_openai_compatible(
         os.environ.get("GITHUB_MODELS_URL", "https://models.github.ai/inference/chat/completions"),
         GITHUB_MODELS_KEY,
         os.environ.get("GITHUB_MODELS_MODEL", "openai/gpt-4o-mini"),
         prompt,
+        timeout=timeout,
     )
 
 
-def _call_anthropic(prompt: str) -> str:
+def _call_anthropic(prompt: str, timeout: int = LLM_TIMEOUT) -> str:
     """Anthropic Claude via the Messages API (not OpenAI-compatible)."""
     resp = requests.post(
         "https://api.anthropic.com/v1/messages",
@@ -1553,7 +1557,7 @@ def _call_anthropic(prompt: str) -> str:
             "max_tokens": LLM_MAX_TOKENS, "temperature": 0.7,
             "messages": [{"role": "user", "content": prompt}],
         },
-        timeout=LLM_TIMEOUT,
+        timeout=timeout,
     )
     resp.raise_for_status()
     return resp.json()["content"][0]["text"]
@@ -1573,7 +1577,7 @@ _EXTRA_OAI = [
 
 
 def _make_oai_caller(url, key, model):
-    return lambda prompt: _call_openai_compatible(url, key, model, prompt)
+    return lambda prompt, timeout=LLM_TIMEOUT: _call_openai_compatible(url, key, model, prompt, timeout=timeout)
 
 
 def _call_llm(prompt: str) -> str:
@@ -1614,15 +1618,19 @@ def _call_llm(prompt: str) -> str:
 
     errors = []
     for name, fn in providers:
-        # Stop starting new providers once we're within one provider-timeout of the
-        # request deadline — guarantees we return our own JSON, never a 504.
-        if _REQUEST_DEADLINE and time.time() > (_REQUEST_DEADLINE - LLM_TIMEOUT):
+        # Give each provider up to LLM_TIMEOUT, but never more than the time left in
+        # the request budget (minus a small buffer to return our JSON). This lets the
+        # last-resort provider use whatever time remains instead of a fixed short cap,
+        # while still guaranteeing we return our own error, never a 504.
+        remaining = (_REQUEST_DEADLINE - time.time()) if _REQUEST_DEADLINE else float(LLM_TIMEOUT)
+        call_timeout = int(min(LLM_TIMEOUT, remaining - 4))
+        if call_timeout < 5:
             errors.append((name, requests.exceptions.Timeout("request budget exhausted")))
             print(f"[nova] stopping provider chain before {name}: request budget nearly exhausted")
             break
         for attempt in (1, 2):
             try:
-                return fn(prompt)
+                return fn(prompt, call_timeout)
             except requests.exceptions.HTTPError as e:
                 code = getattr(e.response, "status_code", None)
                 if code == 429 and attempt == 1:
