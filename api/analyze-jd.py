@@ -133,10 +133,16 @@ class handler(BaseHTTPRequestHandler):
             # return a generic message so internal details never reach the client.
             import traceback
             traceback.print_exc()
-            self._json({
+            payload = {
                 "error": "Something went wrong while generating personas. Please try again.",
                 "error_type": "server_error"
-            }, 500)
+            }
+            # TEMP DEBUG (v4 preview only — REMOVE before merging to main): surface the
+            # real traceback so we can root-cause the 500 without server log access.
+            if os.environ.get("DEBUG_ERRORS", "1") == "1":
+                payload["debug_detail"] = f"{type(e).__name__}: {e}"
+                payload["debug_trace"] = traceback.format_exc()[-1500:]
+            self._json(payload, 500)
 
     def _cors(self):
         # Allowlist of origins permitted to call this endpoint cross-origin.
