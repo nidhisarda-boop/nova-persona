@@ -307,7 +307,7 @@ ENRICH_TIMEOUT = int(os.environ.get("ENRICH_TIMEOUT", "6"))
 # Per-LLM-provider request timeout. MUST be well under the Vercel function
 # maxDuration (60s) so one slow provider can't consume the whole budget and get
 # the function killed before the fallback chain or our error JSON can return.
-LLM_TIMEOUT = int(os.environ.get("LLM_TIMEOUT", "90"))
+LLM_TIMEOUT = int(os.environ.get("LLM_TIMEOUT", "120"))
 # Early/fast providers fail FAST (a hung one must not burn the budget); only the
 # FINAL last-resort provider (usually Claude, which is slower to generate a full
 # map) gets the generous remaining window.
@@ -315,7 +315,7 @@ LLM_TIMEOUT_FAST = int(os.environ.get("LLM_TIMEOUT_FAST", "18"))
 # Hard wall-clock deadline for the whole request (seconds). Set at pipeline start;
 # the LLM loop stops starting new providers once we're within one LLM_TIMEOUT of it,
 # guaranteeing we return our own JSON (honest error) instead of a 504.
-REQUEST_BUDGET_S = int(os.environ.get("REQUEST_BUDGET_S", "185"))
+REQUEST_BUDGET_S = int(os.environ.get("REQUEST_BUDGET_S", "285"))
 _REQUEST_DEADLINE = 0.0
 
 
