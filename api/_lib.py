@@ -307,7 +307,7 @@ ENRICH_TIMEOUT = int(os.environ.get("ENRICH_TIMEOUT", "6"))
 # Per-LLM-provider request timeout. MUST be well under the Vercel function
 # maxDuration (60s) so one slow provider can't consume the whole budget and get
 # the function killed before the fallback chain or our error JSON can return.
-LLM_TIMEOUT = int(os.environ.get("LLM_TIMEOUT", "60"))
+LLM_TIMEOUT = int(os.environ.get("LLM_TIMEOUT", "90"))
 # Early/fast providers fail FAST (a hung one must not burn the budget); only the
 # FINAL last-resort provider (usually Claude, which is slower to generate a full
 # map) gets the generous remaining window.
@@ -315,7 +315,7 @@ LLM_TIMEOUT_FAST = int(os.environ.get("LLM_TIMEOUT_FAST", "18"))
 # Hard wall-clock deadline for the whole request (seconds). Set at pipeline start;
 # the LLM loop stops starting new providers once we're within one LLM_TIMEOUT of it,
 # guaranteeing we return our own JSON (honest error) instead of a 504.
-REQUEST_BUDGET_S = int(os.environ.get("REQUEST_BUDGET_S", "110"))
+REQUEST_BUDGET_S = int(os.environ.get("REQUEST_BUDGET_S", "185"))
 _REQUEST_DEADLINE = 0.0
 
 
@@ -1565,7 +1565,8 @@ _EXTRA_OAI = [
     ("deepseek", DEEPSEEK_KEY, "https://api.deepseek.com/v1/chat/completions",          "DEEPSEEK_MODEL", "deepseek-v4-flash"),
     ("openai",   OPENAI_KEY,   "https://api.openai.com/v1/chat/completions",              "OPENAI_MODEL",   "gpt-4o-mini"),
     ("xai",      XAI_KEY,      "https://api.x.ai/v1/chat/completions",                    "XAI_MODEL",      "grok-4.3"),
-    ("cohere",   COHERE_KEY,   "https://api.cohere.ai/compatibility/v1/chat/completions", "COHERE_MODEL",   "command-a-03-2025"),
+    # cohere removed — repeatedly 404'd then timed out, wasting ~18s right before the
+    # Anthropic floor. Re-add only if it proves reliable.
 ]
 
 
