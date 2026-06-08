@@ -292,6 +292,9 @@ GEMINI_MODEL   = os.environ.get("GEMINI_MODEL", "gemini-2.0-flash")
 LLM_MAX_TOKENS = int(os.environ.get("LLM_MAX_TOKENS", "8000"))
 
 TIMEOUT = 20
+# Best-effort enrichment (Adzuna/FRED) must never blow the function time budget.
+# The fallback chain can issue several sequential calls, so each one is kept short.
+ENRICH_TIMEOUT = int(os.environ.get("ENRICH_TIMEOUT", "6"))
 
 
 # ── Stage 1: Jina content fetch ────────────────────────────────────────────
@@ -691,7 +694,7 @@ def _enrich_salary(title: str, location: str, market: str, content: str) -> dict
             if where:
                 params["where"] = where
             r = requests.get(
-                f"https://api.adzuna.com/v1/api/jobs/{cc}/search/1", params=params, timeout=TIMEOUT
+                f"https://api.adzuna.com/v1/api/jobs/{cc}/search/1", params=params, timeout=ENRICH_TIMEOUT
             )
             _LAST_ADZUNA_DIAG["http_status"] = r.status_code
             _LAST_ADZUNA_DIAG["geo"] = geo
@@ -731,7 +734,7 @@ def _enrich_income(market: str) -> dict:
             "https://api.stlouisfed.org/fred/series/observations",
             params={"series_id": "MEHOINUSA672N", "api_key": FRED_KEY,
                     "file_type": "json", "sort_order": "desc", "limit": 1},
-            timeout=TIMEOUT,
+            timeout=ENRICH_TIMEOUT,
         )
         if r.status_code != 200:
             return {}
@@ -1957,7 +1960,15 @@ def build_persona_response(text: str = "", url: str = "", source: str = "job_des
     # which deterministic extraction sometimes misses (no labeled title line, or a
     # metro the signal list didn't know). Now that we have the LLM's title + metro,
     # re-detect the market and try Adzuna once more before giving up.
-    if ENABLE_ENRICHMENT and not (salary_data and salary_data.get("mean")) and resolved_title:
+    #
+    # IMPORTANT: only retry when the pre-LLM pass NEVER actually queried Adzuna
+    # (it was gated off for a missing title or undetermined country). If it already
+    # ran the city→state→national chain and came back empty, re-running it would
+    # just repeat the same calls and risk the function's time budget — so skip.
+    _pre_reason = (_adzuna_diag or {}).get("reason", "")
+    _pre_gated = _pre_reason.startswith(("gated_off", "no_adzuna_country"))
+    if (ENABLE_ENRICHMENT and not (salary_data and salary_data.get("mean"))
+            and resolved_title and _pre_gated):
         market2 = market
         if market2 == "Global":
             market2 = _detect_market(f"{data.get('role_summary','')}\n{resolved_loc}", resolved_loc)
