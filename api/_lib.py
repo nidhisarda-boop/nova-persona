@@ -988,7 +988,7 @@ CRITICAL RULES FOR PERSONA GENERATION:
 - EVIDENCE INTEGRITY: evidence_basis, notes, and confidence fields may ONLY cite a source whose data was actually supplied in INPUT DATA (STRUCTURED_JD, ONET_GROUNDING, MARKET_GROUNDING). NEVER invent source names such as "LinkedIn postings", "Glassdoor salary data", "Indeed insights", or "alumni placement data".
 - STRUCTURED_JD fields COUNT AS SOURCED. When salary or location came from STRUCTURED_JD, treat them as grounded: evidence_basis should say "Sourced from the job posting", salary/location are High confidence, and sourced_vs_inferred must state which facts came from the JD vs were inferred. Only when neither the JD nor an external source provided salary/location do you write "Inferred from JD requirements; external salary source not used" and keep overall_score ≤ 65.
 - NO NAMED SALARY SOURCES: never attribute an inferred salary/income figure to a specific website, report, or dataset you were not given (e.g. "SalaryExpert", "Payscale", "Glassdoor", "BLS", "ZipRecruiter salary data"). If a figure is inferred, write exactly "inferred from US labor-market norms" — naming a source you did not receive is fabrication. EXCEPTION: if ADZUNA_SALARY data is present in INPUT DATA, it WAS actually queried for this role — you MUST use it to ground compensation, cite it as "Adzuna market data", and mark salary as SOURCED / High confidence.
-- NO FABRICATED PERKS OR OWNERSHIP: never claim the role offers equity, ownership, stock, profit-share, a franchise, or any specific benefit the JD does not explicitly state — in job_ad_rewrite, recommendations, or anywhere. In particular do NOT use the word "equity" or imply ownership unless the JD literally states it. If the JD mentions an advancement path (e.g. "fast-track to Operating Partner"), describe it as a "path to [role] and higher earning potential", NOT as equity or ownership.
+- NO FABRICATED PERKS OR OWNERSHIP: never claim the role offers equity, ownership, stock, profit-share, a franchise, or any specific benefit the JD does not explicitly state — in conversion_hook, job_ad_rewrite, recommendations, or anywhere. In particular do NOT use the word "equity" or imply ownership unless the JD literally states it. If the JD mentions an advancement path (e.g. "fast-track to Operating Partner"), describe it as a "path to [role] and higher earning potential", NOT as equity or ownership.
 - Personas MUST be labor-market segments (real candidate pools with distinct backgrounds and paths to this role), NOT personality archetypes ("The Results Driver", "The Relationship Builder")
 - Each persona's archetype AND name must name a SOURCEABLE prior-background talent pool — a real group you could filter for on LinkedIn/Naukri by their last role, industry, or employer type (e.g. "Agency Campaign Operator", "CPG Brand Marketer", "Media-Agency Social Lead", "The Ad Ops Operator", "The SaaS CS Migrant")
 - BANNED as an archetype or name: functional skills or personality traits that EVERY candidate for this role would share — e.g. "Data-Driven", "Creative", "Storyteller", "Data-Driven Brand Builder", "Creative Storyteller", "Strategic Thinker", "Results-Driven", "Innovative". These are not distinct candidate pools and cannot be sourced. Litmus test: if you cannot rephrase the archetype as "their last role was X" or "they come from Y industry", it is INVALID — fix it before returning.
@@ -1086,6 +1086,8 @@ GIG/CONTRACTOR ROLE SPECIAL RULES (apply when preset = gig_flexible or hourly_fr
 4. ANTI-REPETITION: The following MUST be DIFFERENT across all personas:
    - primary_motivation (ban: using "flexibility and autonomy" for more than one persona; also do NOT reuse "job security" or "career advancement" as the primary for more than one)
    - pain_points (the friction/frustration list cannot be the same set — e.g. "poor work-life balance, limited opportunities" — repeated across personas)
+   - sourcing_channel.primary (no two personas can share the same primary channel)
+   - conversion_hook.headline (every headline must be genuinely different)
    - churn_trigger (cannot be the same payment/income issue for every persona)
 5. COMPETING APPS: For platform gig roles, the multi-app segment is real and large. At least one persona should address a driver who already uses competing platforms (Uber, DoorDash, Instacart). Their acquisition hook is "marginal value of adding Lyft" not "join Lyft."
 6. ROLE TYPE: For contractor roles, use "contractor" in employment_status fields, not "employee" or "part-time worker".
@@ -1113,12 +1115,23 @@ SELF-VALIDATION — Before returning output, check all of these. If any fail, re
 ✗ REJECT if income figures use the wrong currency for the role's country
 ✗ REJECT if sourcing channels are country-wrong (e.g. Indeed/Facebook Local for an India role)
 ✗ REJECT if any persona age range starts below the role's minimum eligibility age
+✗ REJECT if any conversion_hook.headline contains a specific earnings dollar/currency amount not sourced directly from the JD
 ✗ REJECT if Axis C = 1 while personas span multiple income tiers or mix single/dual-income households (that is bimodal → Axis C ≥ 2)
 ✗ REJECT if Axis D = 1 while personas come from clearly different industries/entry-paths (→ Axis D ≥ 2)
+✗ REJECT if any persona's sourcing_channel lacks a real boolean search_string or has fewer than 5 target_companies
+✗ REJECT if any persona is missing application_dropoff_risk.risk and .fix
+✗ REJECT if two personas share the same conversion_hook.headline
 ✗ REJECT if deal_breakers are identical across personas or merely restate the JD's hard requirements (they must be the CANDIDATE's segment-specific objections)
 ✗ REJECT if all primary_motivations are variations of "flexibility and autonomy"
+✗ REJECT if two or more personas share the same sourcing_channel.primary
+✗ REJECT if gig role has no persona addressing vehicle access barrier or competing platform users
 
-OUTPUT PRIORITY (the buyer is a Talent Marketing / Employer Brand lead — they need WHO to target and WHY the JD attracts the wrong people). Make these fields excellent:
+ACTIVATION OUTPUT PRIORITY (this is the core product — spend your effort here):
+The buyer is a Talent Marketing / Employer Brand lead. They need: WHO to target, WHERE to find them, WHAT message converts them, and WHY they drop off. Make these fields excellent:
+- sourcing_channel.search_string: a REAL copy-paste boolean string (role-title synonyms AND industry terms AND skill phrases). Not "search LinkedIn".
+- sourcing_channel.target_companies: 5-8 named companies/talent pools to poach this exact persona from (competitors, adjacent-industry leaders).
+- conversion_hook: a DIFFERENT, persona-specific pitch per persona — speak to that pool's specific motivation.
+- application_dropoff_risk: why this segment ghosts or declines, and the precise fix — concrete and segment-specific.
 - job_ad_rewrite.recommended_headline: candidate-facing and specific to the role's true operating center (e.g. "Lead global campaign execution for an iconic beer portfolio", not "Lead Global Brand Strategy").
 
 AXIS SCORE ↔ PERSONA CONSISTENCY (score the axes to MATCH the pools you actually generate):
@@ -1134,6 +1147,7 @@ CONDITIONAL FIELDS (avoid no-signal filler):
 FIELD RICHNESS & HONESTY (V2):
 - tech_profile.hardware_devices and key_apps: give specific, realistic examples for THIS segment (e.g. a digital marketer: "Figma", "Google Analytics 4", "Slack", "Asana"; a field gig worker: "budget Android phone", "Google Maps", "the platform app"). Treat these as ILLUSTRATIVE inferences, never as verified facts, and never build evidence claims on them.
 - household_income_note: explain the financial pressure or motivation implication for this segment (e.g. "moving from volatile agency bonuses to a predictable corporate base; motivated by stability and 401(k) match more than raw base") — do not merely restate the number.
+- recruiter_action: sourcing and conversion must be concrete and executable — specific platforms, example search filters, and example employer names as ILLUSTRATIONS — consistent with the role's market and currency.
 - PROOFREAD everything before returning. Correct spelling, correct brand and product names, no typos or garbled words. The job_ad_rewrite.recommended_headline in particular must be clean, correct, and free of errors.
 
 PERSONA QUALIFICATION (pools must actually qualify for the role):
@@ -1150,12 +1164,13 @@ OUTPUT POLISH & HONESTY (V2.1 — enterprise quality):
 - PLAIN-ENGLISH EVIDENCE: evidence_basis must use human-readable source descriptions ("the job posting", "US labor-market norms"). NEVER emit internal variable names (MARKET_GROUNDING, STRUCTURED_JD, ONET_GROUNDING) — those are not sources.
 - PROOFREAD: put a space between a number and its unit ("1 billion", not "1billion"). Never emit placeholders like "(truncated…)". When quoting a JD line to remove, quote it in full or paraphrase it — never a fragment.
 - COMPENSATION LABELING: if the JD discloses NO pay/salary structure, do NOT assume "salaried" and do NOT invent one. Set local_context.role_type to the actual employment type stated (e.g. "full-time"; "contract"/"hourly" only if stated) and local_context.posted_compensation to null. Any household-income or target-pay figure in that case is INFERRED — say so in household_income_note and keep evidence confidence modest.
-- JD-NATIVE PERKS: pull the JD's strongest concrete selling points into job_ad_rewrite where the JD states them — e.g. "dispatch from home", "company vehicle", "year-round work", "401(k) match", named certifications. Lead with the JD's best perks, not generic phrasing.
+- JD-NATIVE CONVERSION HOOKS: pull the JD's strongest concrete selling points into conversion_hook and job_ad_rewrite where the JD states them — e.g. "dispatch from home", "company vehicle", "year-round work", "401(k) match", named certifications. A direct-fit persona's hook should lead with the JD's best perks, not generic phrasing.
 - NO UNSUPPORTED OPERATIONAL CLAIMS: never invent specific operational promises absent from the JD — no "onboarding begins within 48 hours", "instant enrollment", guaranteed timelines, or exact pay amounts not in the JD. CTAs stay benefit-led, not fabricated-specific.
 
 V1.5 INTELLIGENCE FIELDS (populate well — these are the product's wedge):
 - deal_breakers: concrete hard no's for THIS segment, specific to the JD (not generic platitudes).
 - evidence_confidence.confidence_breakdown: honestly bucket fields into high/medium/low. JD-sourced facts (location, salary, experience) are HIGH; inferred demographics (household income, age range) are LOW. Be honest — this is the trust feature.
+- recruiter_action.outreach_script: a real, ready-to-send 3-sentence message in the segment's tone, referencing the JD's best perks. No fabricated specifics.
 - persona_jd_mismatch (top-level): "who you want" vs "who the JD will actually attract", the gap, and the fix. Nova's wedge is WHO WILL ACTUALLY APPLY — not the company's ideal. Make this sharp and employer-brand-useful.
 - CALIBRATE REQUIREMENTS TO THE ROLE'S ACTUAL SCOPE: do not inflate seniority beyond what the role needs. A manager of ONE high-volume location is NOT a multi-unit/area manager — never state "multi-unit management experience" (or similar broader scope) as a hard requirement for a single-location role. If the JD mentions broader scope only as a future growth path, treat it as "preferred", not "required". In jd_hard_filters and persona_jd_mismatch.you_want, frame advanced/broader experience as "preferred" and keep the hard minimum tied to the role's real scope (e.g. "2+ years managing a high-volume restaurant; multi-unit exposure preferred"), so you don't screen out strong single-unit candidates.
 
@@ -1434,6 +1449,24 @@ def _build_prompt(jd_text: str, signals: dict, onet: dict, wages: dict, demos: s
         },
         "evidence_basis": ["string — ONLY sources actually supplied in INPUT DATA; otherwise exactly 'Inferred from JD requirements; external salary source not used'"],
         "notes": "string"
+      },
+      "recruiter_action": {
+        "sourcing_channel": {
+          "primary": "string — exact platform AND how to use it (e.g. 'LinkedIn Recruiter')",
+          "search_string": "string — a copy-paste boolean search: role titles + industry terms + skills (e.g. (\"Brand Manager\" OR \"Campaign Manager\") AND (CPG OR FMCG OR beverage) AND (\"global campaign\" OR \"media planning\"))",
+          "target_companies": ["string — 5-8 specific companies/talent pools to source this persona from"],
+          "organic_play": "string — non-paid tactic"
+        },
+        "conversion_hook": {
+          "headline": "string — persona-specific ad headline (different for each persona)",
+          "core_value_prop": "string — the pitch that resonates with THIS pool specifically"
+        },
+        "outreach_script": "string — a ready-to-send 3-sentence outreach/InMail tuned to THIS segment's tone and primary motivation (consultative/executive for senior pools; stability+ownership for agency leavers; benefits+steady-pay for frontline). Reference the JD's best perks. No fabricated specifics.",
+        "application_dropoff_risk": {
+          "risk": "string — why THIS segment abandons before applying or declines the offer",
+          "fix": "string — the specific change to JD/process/messaging that removes that drop-off"
+        },
+        "funnel_friction_killer": "string — exact application process change"
       }
     }
   ]
