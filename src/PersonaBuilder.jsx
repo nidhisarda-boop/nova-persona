@@ -1474,6 +1474,11 @@ export default function PersonaBuilder() {
           .nova-card { break-inside: auto !important; page-break-inside: auto !important; }
           .nova-cardbody > * { break-inside: avoid !important; page-break-inside: avoid !important; }
           .nova-card, .nova-card * { orphans: 3; widows: 3; }
+          /* Clean export: drop all interactive chrome so the PDF is just the map. */
+          .no-print { display: none !important; }
+          .nova-card button { display: none !important; }   /* lock icons */
+          body { background: #fff !important; }
+          @page { margin: 12mm; }
         }
       `}</style>
 
@@ -1487,7 +1492,7 @@ export default function PersonaBuilder() {
 
       <main style={S.main}>
         {/* Tab bar */}
-        <div style={{ display: "flex", gap: 8, marginBottom: 20 }}>
+        <div className="no-print" style={{ display: "flex", gap: 8, marginBottom: 20 }}>
           {[
             ["map", "Persona Map"],
             ["definitions", "Definitions"],
@@ -1516,7 +1521,7 @@ export default function PersonaBuilder() {
         ) : (
         <>
         {/* Input Card */}
-        <div style={S.inputCard}>
+        <div className="no-print" style={S.inputCard}>
           {/* Toggle */}
           <div style={S.toggleRow}>
             <button
@@ -1620,6 +1625,21 @@ export default function PersonaBuilder() {
 
         {result && !loading && result.page_type !== "search_results" && (
           <>
+            <div className="no-print" style={{ display: "flex", justifyContent: "flex-end", marginBottom: 12 }}>
+              <button
+                onClick={() => window.print()}
+                title="Export this map as a PDF"
+                style={{
+                  display: "inline-flex", alignItems: "center", gap: 8,
+                  padding: "9px 18px", borderRadius: 10, border: "none",
+                  background: "#6366f1", color: "#fff", fontWeight: 700,
+                  fontSize: 14, cursor: "pointer",
+                  boxShadow: "0 1px 3px rgba(99,102,241,0.35)",
+                }}
+              >
+                <span style={{ fontSize: 16 }}>⬇</span> Export PDF
+              </button>
+            </div>
             <Banner data={result} />
             <MismatchBlock data={result.persona_jd_mismatch} />
 
