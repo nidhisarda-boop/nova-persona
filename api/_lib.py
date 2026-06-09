@@ -1403,7 +1403,7 @@ def _build_prompt(jd_text: str, signals: dict, onet: dict, wages: dict, demos: s
         "pew_household_income_tier": "Lower|Lower-middle|Middle|Upper-middle|Upper",
         "household_income_range": "string",
         "household_income_note": "string — financial pressure/motivation implication, not a restatement of the number",
-        "target_monthly_income_from_role": "string — estimated GROSS MONTHLY income from THIS role, as a DOLLAR figure or range, e.g. '$2,200' or '$1,800–$2,400'. NEVER a dependency word like 'Primary'.",
+        "target_monthly_income_from_role": "string — estimated GROSS MONTHLY income from THIS role, as a DOLLAR RANGE that reflects variable shifts/hours, e.g. '$1,800–$2,400'. ALWAYS a range, never a single flat figure, and never a dependency word like 'Primary'.",
         "income_dependency": "Primary|Secondary|Supplemental",
         "hours_per_week_expected": "string — GIG/HOURLY/FRONTLINE ONLY; set null for salaried/corporate",
         "payment_preference": "Daily instant|Weekly|Monthly — GIG/HOURLY/FRONTLINE ONLY; set null for salaried/corporate"
@@ -1970,10 +1970,21 @@ def _fix_persona_display(data: dict) -> dict:
             label = f"{meta.get('name','')} {meta.get('archetype','')}"
             if not _BRIDGE_KW.search(label):
                 meta["is_bridge_persona"] = False
-        # (2) Expected Monthly must contain a number; otherwise drop it
+        # (2) Expected Monthly must be a DOLLAR RANGE. Blank a non-money value (e.g.
+        #     'Primary'); expand a single dollar figure into a ±15% range.
         tm = fin.get("target_monthly_income_from_role")
-        if isinstance(tm, str) and not re.search(r"\d", tm):
-            fin["target_monthly_income_from_role"] = ""
+        if isinstance(tm, str):
+            nums = [int(x.replace(",", "")) for x in re.findall(r"[\d,]{2,}", tm)
+                    if x.replace(",", "").isdigit()]
+            nums = [n for n in nums if n >= 100]
+            if not nums:
+                fin["target_monthly_income_from_role"] = ""
+            elif len(nums) == 1:
+                n = nums[0]
+                lo = int(round(n * 0.85 / 50)) * 50
+                hi = int(round(n * 1.15 / 50)) * 50
+                fin["target_monthly_income_from_role"] = f"${lo:,}–${hi:,}"
+            # 2+ numbers → already a range, leave as the model wrote it
     return data
 
 
