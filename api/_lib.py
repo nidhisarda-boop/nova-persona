@@ -1083,14 +1083,15 @@ GIG/CONTRACTOR ROLE SPECIAL RULES (apply when preset = gig_flexible or hourly_fr
    - "Needs rental/Express Drive option" — high intent, blocked by upfront cost, convert via rental program
    - "Unsure if vehicle qualifies" — needs vehicle requirements clarification first
    This MUST appear in at least one persona's onboarding friction or churn trigger.
-4. ANTI-REPETITION: The following MUST be DIFFERENT across all personas:
+4. ONBOARDING QUESTIONS NOT INTERVIEW QUESTIONS: For contractor/gig roles, replace "screening_question" with an onboarding/conversion question — the goal is to predict activation and retention, not assess fit for employment. Example: "What would make you prioritize Lyft over your other earning apps this week?" not "Tell me about yourself."
+5. ANTI-REPETITION: The following MUST be DIFFERENT across all personas:
    - primary_motivation (ban: using "flexibility and autonomy" for more than one persona; also do NOT reuse "job security" or "career advancement" as the primary for more than one)
    - pain_points (the friction/frustration list cannot be the same set — e.g. "poor work-life balance, limited opportunities" — repeated across personas)
    - sourcing_channel.primary (no two personas can share the same primary channel)
    - conversion_hook.headline (every headline must be genuinely different)
    - churn_trigger (cannot be the same payment/income issue for every persona)
-5. COMPETING APPS: For platform gig roles, the multi-app segment is real and large. At least one persona should address a driver who already uses competing platforms (Uber, DoorDash, Instacart). Their acquisition hook is "marginal value of adding Lyft" not "join Lyft."
-6. ROLE TYPE: For contractor roles, use "contractor" in employment_status fields, not "employee" or "part-time worker".
+6. COMPETING APPS: For platform gig roles, the multi-app segment is real and large. At least one persona should address a driver who already uses competing platforms (Uber, DoorDash, Instacart). Their acquisition hook is "marginal value of adding Lyft" not "join Lyft."
+7. ROLE TYPE: For contractor roles, use "contractor" in employment_status fields, not "employee" or "part-time worker".
 
 SELF-VALIDATION — Before returning output, check all of these. If any fail, regenerate:
 ✗ REJECT if all personas share the same age range
@@ -1111,7 +1112,7 @@ SELF-VALIDATION — Before returning output, check all of these. If any fail, re
 ✗ REJECT if household_income_range is IDENTICAL across personas — each segment has a different household financial reality (a dual-income veteran, a single-parent earner, a student household, and a career-changer do NOT all sit in the same band). Give each persona a household_income_range that reflects its own life stage and earner structure; no two personas may share the exact same range, and the spread across personas must be meaningful (the lowest and highest segments should differ by at least one full tier).
 ✗ REJECT if target_monthly_income_from_role is inconsistent with the JD's stated salary (gross monthly ≈ JD annual ÷ 12) when the JD states a salary
 ✗ REJECT if overall_score is ≥ 75 while salary AND location were NOT grounded (no structured salary/location and no external source) — in that case overall_score must be ≤ 65
-✗ REJECT if the JD's shift constraint, location, or required metrics do NOT appear in at least one churn_trigger
+✗ REJECT if the JD's shift constraint, location, or required metrics do NOT appear in at least one churn_trigger or screening_question
 ✗ REJECT if income figures use the wrong currency for the role's country
 ✗ REJECT if sourcing channels are country-wrong (e.g. Indeed/Facebook Local for an India role)
 ✗ REJECT if any persona age range starts below the role's minimum eligibility age
@@ -1133,6 +1134,7 @@ The buyer is a Talent Marketing / Employer Brand lead. They need: WHO to target,
 - conversion_hook: a DIFFERENT, persona-specific pitch per persona — speak to that pool's specific motivation.
 - application_dropoff_risk: why this segment ghosts or declines, and the precise fix. This is more valuable than any interview question.
 - job_ad_rewrite.recommended_headline: candidate-facing and specific to the role's true operating center (e.g. "Lead global campaign execution for an iconic beer portfolio", not "Lead Global Brand Strategy").
+The screening_question / diagnostic is SECONDARY — keep it to one strong question; do not let it compensate for weak sourcing or segmentation.
 
 AXIS SCORE ↔ PERSONA CONSISTENCY (score the axes to MATCH the pools you actually generate):
 - Axis C (HH Income): if your personas span more than one income tier, or mix single-income and dual-income households, or cover a household-income range wider than ~$40k, Axis C is at least 2 (bimodal); a full spectrum is 3. Do NOT score Axis C = 1 while generating personas with visibly different income structures.
@@ -1147,6 +1149,7 @@ CONDITIONAL FIELDS (avoid no-signal filler):
 FIELD RICHNESS & HONESTY (V2):
 - tech_profile.hardware_devices and key_apps: give specific, realistic examples for THIS segment (e.g. a digital marketer: "Figma", "Google Analytics 4", "Slack", "Asana"; a field gig worker: "budget Android phone", "Google Maps", "the platform app"). Treat these as ILLUSTRATIVE inferences, never as verified facts, and never build evidence claims on them.
 - household_income_note: explain the financial pressure or motivation implication for this segment (e.g. "moving from volatile agency bonuses to a predictable corporate base; motivated by stability and 401(k) match more than raw base") — do not merely restate the number.
+- screening_question: the high_risk_answer and risk_rationale must be concrete and role-specific, so a recruiter with no training can evaluate the answer.
 - recruiter_action: sourcing and conversion must be concrete and executable — specific platforms, example search filters, and example employer names as ILLUSTRATIONS — consistent with the role's market and currency.
 - PROOFREAD everything before returning. Correct spelling, correct brand and product names, no typos or garbled words. The job_ad_rewrite.recommended_headline in particular must be clean, correct, and free of errors.
 
@@ -1169,6 +1172,7 @@ OUTPUT POLISH & HONESTY (V2.1 — enterprise quality):
 
 V1.5 INTELLIGENCE FIELDS (populate well — these are the product's wedge):
 - deal_breakers: concrete hard no's for THIS segment, specific to the JD (not generic platitudes).
+- candidate_journey: where THIS segment drops at each funnel stage (discovery → click → apply → interview → offer → early-churn). One crisp, segment-specific reason per stage.
 - evidence_confidence.confidence_breakdown: honestly bucket fields into high/medium/low. JD-sourced facts (location, salary, experience) are HIGH; inferred demographics (household income, age range) are LOW. Be honest — this is the trust feature.
 - recruiter_action.outreach_script: a real, ready-to-send 3-sentence message in the segment's tone, referencing the JD's best perks. No fabricated specifics.
 - persona_jd_mismatch (top-level): "who you want" vs "who the JD will actually attract", the gap, and the fix. Nova's wedge is WHO WILL ACTUALLY APPLY — not the company's ideal. Make this sharp and employer-brand-useful.
@@ -1434,6 +1438,14 @@ def _build_prompt(jd_text: str, signals: dict, onet: dict, wages: dict, demos: s
         }
       },
       "deal_breakers": ["string — from the CANDIDATE'S perspective: what about THIS role would make THIS specific segment decline or not apply (their walk-away triggers), e.g. a remote-first agency lead: 'mandatory 5-day on-site'; a senior pro: 'no real brand ownership / too junior a title'; a gig worker: 'pay below their current app'. These are the candidate's objections, NOT the employer's requirements, and MUST differ meaningfully across personas. 3-5 items."],
+      "candidate_journey": {
+        "discovery_risk": "string — why this segment may never SEE the role (wrong channels, weak title)",
+        "click_risk": "string — why they may ignore the ad even if they see it",
+        "apply_risk": "string — why they may abandon the application form",
+        "interview_risk": "string — why they may disengage during interviews",
+        "offer_risk": "string — why they may reject the offer",
+        "early_churn_risk": "string — why they may leave within the first 90 days"
+      },
       "tech_profile": {
         "key_apps": ["string — apps/platforms this segment lives in, useful for sourcing"],
         "tech_savviness_score": "integer 1-5 — GIG/HOURLY/FRONTLINE ONLY; set null for corporate/professional",
@@ -1449,6 +1461,12 @@ def _build_prompt(jd_text: str, signals: dict, onet: dict, wages: dict, demos: s
         },
         "evidence_basis": ["string — ONLY sources actually supplied in INPUT DATA; otherwise exactly 'Inferred from JD requirements; external salary source not used'"],
         "notes": "string"
+      },
+      "screening_question": {
+        "question": "string — recommended diagnostic interview/onboarding question for THIS segment",
+        "high_risk_answer": "string — the response pattern that is a RED FLAG (e.g. focuses only on vanity metrics or short-term launch spikes)",
+        "risk_rationale": "string — why that answer predicts poor fit or early churn for THIS specific role",
+        "why_it_matters": "string — what a strong answer reveals"
       },
       "recruiter_action": {
         "sourcing_channel": {
