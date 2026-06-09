@@ -1131,7 +1131,7 @@ The buyer is a Talent Marketing / Employer Brand lead. They need: WHO to target,
 - sourcing_channel.search_string: a REAL copy-paste boolean string (role-title synonyms AND industry terms AND skill phrases). Not "search LinkedIn".
 - sourcing_channel.target_companies: 5-8 named companies/talent pools to poach this exact persona from (competitors, adjacent-industry leaders).
 - conversion_hook: a DIFFERENT, persona-specific pitch per persona — speak to that pool's specific motivation.
-- application_dropoff_risk: why this segment ghosts or declines, and the precise fix — concrete and segment-specific.
+- application_dropoff_risk: why this segment ghosts or declines, and the precise fix. This is more valuable than any interview question.
 - job_ad_rewrite.recommended_headline: candidate-facing and specific to the role's true operating center (e.g. "Lead global campaign execution for an iconic beer portfolio", not "Lead Global Brand Strategy").
 
 AXIS SCORE ↔ PERSONA CONSISTENCY (score the axes to MATCH the pools you actually generate):
