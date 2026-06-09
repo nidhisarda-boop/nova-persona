@@ -1403,7 +1403,7 @@ def _build_prompt(jd_text: str, signals: dict, onet: dict, wages: dict, demos: s
         "pew_household_income_tier": "Lower|Lower-middle|Middle|Upper-middle|Upper",
         "household_income_range": "string",
         "household_income_note": "string — financial pressure/motivation implication, not a restatement of the number",
-        "target_monthly_income_from_role": "string",
+        "target_monthly_income_from_role": "string — estimated GROSS MONTHLY income from THIS role, as a DOLLAR figure or range, e.g. '$2,200' or '$1,800–$2,400'. NEVER a dependency word like 'Primary'.",
         "income_dependency": "Primary|Secondary|Supplemental",
         "hours_per_week_expected": "string — GIG/HOURLY/FRONTLINE ONLY; set null for salaried/corporate",
         "payment_preference": "Daily instant|Weekly|Monthly — GIG/HOURLY/FRONTLINE ONLY; set null for salaried/corporate"
